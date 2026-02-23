@@ -613,3 +613,50 @@ export function listRuns(): RunState[] {
     logs: [...state.logs],
   }));
 }
+
+/**
+ * Kill all child processes, clear all pollers/timers, and persist final state.
+ * Called during app shutdown to ensure a clean exit.
+ */
+export function cleanupAllRuns() {
+  // Clear the persist timer
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+
+  for (const [runId, run] of activeRuns) {
+    // Stop log polling
+    if (run.logPoller) {
+      clearInterval(run.logPoller);
+      run.logPoller = null;
+    }
+
+    // Kill the child process
+    if (run.process) {
+      try { run.process.kill('SIGTERM'); } catch { /* already dead */ }
+      try { run.process.kill('SIGKILL'); } catch { /* already dead */ }
+    }
+
+    // Also kill by PID (covers detached / background processes)
+    const pid = run.state.pid;
+    if (pid && pid > 0) {
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* ignore */ }
+      try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+    }
+
+    // Mark running runs as stopped
+    if (run.state.status === 'running') {
+      run.state.status = 'stopped';
+      run.state.finishedAt = Date.now();
+      persistedRuns.set(runId, { ...run.state, phases: { ...run.state.phases }, logs: [...run.state.logs] });
+    }
+  }
+
+  activeRuns.clear();
+
+  // Persist synchronously so data isn't lost
+  try {
+    persistRunsNow();
+  } catch { /* non-fatal */ }
+}

@@ -2,6 +2,7 @@ import { app, BrowserWindow, Notification, nativeTheme } from 'electron';
 import { existsSync } from 'fs';
 import path from 'path';
 import { registerIpcHandlers } from './ipc-handlers';
+import { cleanupAllRuns } from './script-runner';
 
 let mainWindow: BrowserWindow | null = null;
 let isShuttingDown = false;
@@ -15,6 +16,10 @@ function forceExitSoon() {
 function shutdownApp() {
   if (isShuttingDown) return;
   isShuttingDown = true;
+
+  try {
+    cleanupAllRuns();
+  } catch { /* best-effort */ }
 
   try {
     app.quit();
@@ -126,13 +131,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (isShuttingDown) {
-    app.quit();
-    return;
-  }
-
-  // On macOS, keep the app running in the dock
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  // Always quit — keeping the app alive in the dock without a window
+  // causes hangs when the dev server or renderer process disappears.
+  shutdownApp();
 });
