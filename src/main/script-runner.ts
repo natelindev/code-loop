@@ -17,6 +17,74 @@ import type {
 import { PIPELINE_PHASES, IPC } from '../shared/types';
 
 const activeRuns = new Map<string, { state: RunState; process: ChildProcess }>();
+const persistedRuns = new Map<string, RunState>();
+const RUN_HISTORY_PATH = path.join(os.homedir(), '.opencode-loop-runs.json');
+const MAX_LOGS_PER_RUN = 10000;
+
+let persistTimer: NodeJS.Timeout | null = null;
+
+function persistRunsNow() {
+  const runs = Array.from(persistedRuns.values()).sort((a, b) => a.startedAt - b.startedAt);
+  fs.writeFileSync(RUN_HISTORY_PATH, JSON.stringify(runs), 'utf-8');
+}
+
+function schedulePersist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      persistRunsNow();
+    } catch {
+      // Non-fatal: persistence should not break run execution.
+    }
+  }, 250);
+}
+
+function persistRunState(state: RunState) {
+  persistedRuns.set(state.id, {
+    ...state,
+    phases: { ...state.phases },
+    logs: [...state.logs],
+  });
+  schedulePersist();
+}
+
+function loadPersistedRuns() {
+  if (!fs.existsSync(RUN_HISTORY_PATH)) return;
+  let didMigrateRunningStatus = false;
+  try {
+    const raw = fs.readFileSync(RUN_HISTORY_PATH, 'utf-8');
+    const parsed = JSON.parse(raw) as RunState[];
+    for (const run of parsed) {
+      const loadedRun: RunState = {
+        ...run,
+        phases: { ...run.phases },
+        logs: Array.isArray(run.logs) ? run.logs : [],
+      };
+
+      if (loadedRun.status === 'running') {
+        didMigrateRunningStatus = true;
+        loadedRun.status = 'stopped';
+        loadedRun.finishedAt = loadedRun.finishedAt ?? Date.now();
+        loadedRun.logs.push({
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          phase: 'INIT',
+          message: 'Run marked as stopped after app restart',
+          raw: '[INIT] Run marked as stopped after app restart',
+        });
+      }
+
+      persistedRuns.set(loadedRun.id, loadedRun);
+    }
+    if (didMigrateRunningStatus) {
+      schedulePersist();
+    }
+  } catch {
+    // Ignore malformed history and continue with empty history.
+  }
+}
+
+loadPersistedRuns();
 
 function createInitialPhases(skipPlan: boolean): Record<string, PhaseStatus> {
   const phases: Record<string, PhaseStatus> = {};
@@ -83,6 +151,9 @@ function markPhaseCompleted(state: RunState, phase: string) {
 
 function handleLogEntry(runId: string, entry: LogEntry, state: RunState) {
   state.logs.push(entry);
+  if (state.logs.length > MAX_LOGS_PER_RUN) {
+    state.logs.splice(0, state.logs.length - MAX_LOGS_PER_RUN);
+  }
 
   // Detect phase transitions
   const phase = entry.phase.toUpperCase();
@@ -120,6 +191,7 @@ function handleLogEntry(runId: string, entry: LogEntry, state: RunState) {
     currentPhase: state.currentPhase,
     phases: { ...state.phases },
   });
+  persistRunState(state);
 }
 
 export function startRun(options: RunOptions): string {
@@ -151,7 +223,14 @@ export function startRun(options: RunOptions): string {
   };
 
   // Build args — always foreground, the app manages concurrency
-  const args = ['--fg', '--config', path.join(os.homedir(), '.opencode-loop.conf'), '--repo-dir', options.repoPath];
+  const args = [
+    '--fg',
+    '--log-opencode',
+    '--config',
+    path.join(os.homedir(), '.opencode-loop.conf'),
+    '--repo-dir',
+    options.repoPath,
+  ];
 
   // Handle skip plan
   let planTempFile: string | null = null;
@@ -192,6 +271,7 @@ export function startRun(options: RunOptions): string {
 
   state.pid = child.pid ?? null;
   activeRuns.set(runId, { state, process: child });
+  persistRunState(state);
 
   // Send initial state
   sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
@@ -274,6 +354,7 @@ export function startRun(options: RunOptions): string {
 
     sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
     sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status });
+    persistRunState(state);
   });
 
   child.on('error', (err) => {
@@ -281,6 +362,7 @@ export function startRun(options: RunOptions): string {
     state.finishedAt = Date.now();
     sendToRenderer(IPC.RUN_ERROR, { runId, error: err.message });
     sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    persistRunState(state);
   });
 
   return runId;
@@ -293,6 +375,7 @@ export function stopRun(runId: string): boolean {
   run.state.status = 'stopped';
   run.state.finishedAt = Date.now();
   sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...run.state } });
+  persistRunState(run.state);
 
   try {
     // Kill process group first so child/sub-processes are terminated together.
@@ -316,9 +399,15 @@ export function stopRun(runId: string): boolean {
 }
 
 export function getRunState(runId: string): RunState | null {
-  return activeRuns.get(runId)?.state ?? null;
+  const active = activeRuns.get(runId)?.state;
+  if (active) return active;
+  return persistedRuns.get(runId) ?? null;
 }
 
 export function listRuns(): RunState[] {
-  return Array.from(activeRuns.values()).map((r) => ({ ...r.state, logs: [] }));
+  return Array.from(persistedRuns.values()).map((state) => ({
+    ...state,
+    phases: { ...state.phases },
+    logs: [...state.logs],
+  }));
 }

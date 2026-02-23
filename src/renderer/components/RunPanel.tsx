@@ -81,6 +81,10 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
     navigator.clipboard.writeText(text);
   };
 
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(run.prompt);
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 pt-12 bg-background/50">
       {/* Header */}
@@ -141,6 +145,15 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
               Open PR
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyPrompt}
+            className="h-8 text-xs shadow-sm transition-all"
+          >
+            <Copy className="w-3.5 h-3.5 mr-1.5" />
+            Copy Prompt
+          </Button>
           <Button
             variant="outline"
             size="sm"
