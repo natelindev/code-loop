@@ -9,7 +9,12 @@ export function useRuns() {
 
   // Load existing runs on mount
   useEffect(() => {
-    api().listRuns().then(setRuns);
+    api().listRuns().then((existingRuns) => {
+      for (const run of existingRuns) {
+        logsRef.current.set(run.id, [...run.logs]);
+      }
+      setRuns(existingRuns);
+    });
   }, []);
 
   // Subscribe to streaming events

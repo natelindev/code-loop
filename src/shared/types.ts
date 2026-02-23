@@ -38,12 +38,19 @@ export interface RunState {
   finishedAt: number | null;
   pid: number | null;
   skipPlan: boolean;
+  background: boolean;
+  modelOverrides: Partial<ModelConfig> | null;
+  planText: string | null;
+  runMode: 'foreground' | 'background';
+  logFilePath: string | null;
+  logFileOffset: number;
 }
 
 export interface RunOptions {
   repoPath: string;
   prompt: string;
   skipPlan: boolean;
+  background?: boolean;
   planText?: string;
   modelOverrides?: Partial<ModelConfig>;
 }
@@ -61,6 +68,7 @@ export interface ModelConfig {
 export interface AppConfig {
   workspaceRoot: string;
   models: ModelConfig;
+  lastModelOverrides: Partial<ModelConfig>;
   postCloneCommands: string[];
   maxRetries: number;
   retryDelays: number[];

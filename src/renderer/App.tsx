@@ -5,6 +5,7 @@ import NewRunDialog from './components/NewRunDialog';
 import ConfigEditor from './components/ConfigEditor';
 import { useRuns } from './hooks/useRuns';
 import { useConfig } from './hooks/useConfig';
+import type { RunOptions } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { ModeToggle } from './components/theme/mode-toggle';
 import { RefreshCw } from 'lucide-react';
@@ -16,6 +17,7 @@ export default function App() {
   const { config, loading: configLoading, save: saveConfig } = useConfig();
   const [view, setView] = useState<View>('runs');
   const [showNewRun, setShowNewRun] = useState(false);
+  const [newRunPreset, setNewRunPreset] = useState<Partial<RunOptions> | null>(null);
 
   if (configLoading || !config) {
     return (
@@ -41,7 +43,10 @@ export default function App() {
         runs={runs}
         selectedRunId={selectedRunId}
         onSelectRun={setSelectedRunId}
-        onNewRun={() => setShowNewRun(true)}
+        onNewRun={() => {
+          setNewRunPreset(null);
+          setShowNewRun(true);
+        }}
         view={view}
         onViewChange={setView}
       />
@@ -50,7 +55,14 @@ export default function App() {
         {view === 'config' ? (
           <ConfigEditor key={JSON.stringify(config)} config={config} onSave={saveConfig} />
         ) : selectedRun ? (
-          <RunPanel run={selectedRun} onStop={stopRun} />
+          <RunPanel
+            run={selectedRun}
+            onStop={stopRun}
+            onRerun={(options) => {
+              setNewRunPreset(options);
+              setShowNewRun(true);
+            }}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <div className="text-center animate-in fade-in zoom-in duration-500">
@@ -59,7 +71,14 @@ export default function App() {
               </div>
               <h2 className="text-xl font-medium mb-2 text-foreground">No run selected</h2>
               <p className="text-sm mb-6">Start a new run or select one from the sidebar</p>
-              <Button onClick={() => setShowNewRun(true)} size="lg" className="transition-all hover:scale-105">
+              <Button
+                onClick={() => {
+                  setNewRunPreset(null);
+                  setShowNewRun(true);
+                }}
+                size="lg"
+                className="transition-all hover:scale-105"
+              >
                 New Run
               </Button>
             </div>
@@ -69,16 +88,25 @@ export default function App() {
 
       {showNewRun && (
         <NewRunDialog
+          initialOptions={newRunPreset}
           config={config}
           onStart={async (options) => {
             const result = await startRun(options);
             if (result.ok) {
+              await saveConfig({
+                ...config,
+                lastModelOverrides: options.modelOverrides ?? {},
+              });
+              setNewRunPreset(null);
               setShowNewRun(false);
               setView('runs');
             }
             return result;
           }}
-          onClose={() => setShowNewRun(false)}
+          onClose={() => {
+            setShowNewRun(false);
+            setNewRunPreset(null);
+          }}
         />
       )}
     </div>

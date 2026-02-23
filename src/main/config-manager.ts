@@ -19,6 +19,7 @@ const DEFAULT_MODELS: ModelConfig = {
 const DEFAULT_CONFIG: AppConfig = {
   workspaceRoot: path.join(os.homedir(), 'opencode-workspaces'),
   models: { ...DEFAULT_MODELS },
+  lastModelOverrides: {},
   postCloneCommands: ['pnpm i'],
   maxRetries: 3,
   retryDelays: [10, 30, 60],
@@ -52,6 +53,9 @@ export function loadConfig(): AppConfig {
         ...DEFAULT_CONFIG,
         ...parsedWithoutScriptPath,
         models: { ...DEFAULT_MODELS, ...(parsedWithoutScriptPath.models as Partial<ModelConfig> | undefined) },
+        lastModelOverrides: {
+          ...(parsedWithoutScriptPath.lastModelOverrides as Partial<ModelConfig> | undefined),
+        },
       };
     }
   } catch {

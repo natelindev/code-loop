@@ -16,10 +16,19 @@ import type {
 } from '../shared/types';
 import { PIPELINE_PHASES, IPC } from '../shared/types';
 
-const activeRuns = new Map<string, { state: RunState; process: ChildProcess }>();
+type ActiveRun = {
+  state: RunState;
+  process: ChildProcess | null;
+  logPoller: NodeJS.Timeout | null;
+  logLineBuffer: string;
+};
+
+const activeRuns = new Map<string, ActiveRun>();
 const persistedRuns = new Map<string, RunState>();
 const RUN_HISTORY_PATH = path.join(os.homedir(), '.opencode-loop-runs.json');
 const MAX_LOGS_PER_RUN = 10000;
+const BG_BOOTSTRAP_REGEX = /Running in background\. Log: (.+)\. PID: (\d+)$/;
+const PLAN_FILE_REGEX = /Plan saved to (.+)$/;
 
 let persistTimer: NodeJS.Timeout | null = null;
 
@@ -49,6 +58,123 @@ function persistRunState(state: RunState) {
   schedulePersist();
 }
 
+function isProcessAlive(pid: number | null): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readNewLogChunk(filePath: string, offset: number): { chunk: string; nextOffset: number } {
+  if (!fs.existsSync(filePath)) {
+    return { chunk: '', nextOffset: offset };
+  }
+
+  const stats = fs.statSync(filePath);
+  if (stats.size <= offset) {
+    return { chunk: '', nextOffset: stats.size };
+  }
+
+  const length = stats.size - offset;
+  const buffer = Buffer.alloc(length);
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    fs.readSync(fd, buffer, 0, length, offset);
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  return {
+    chunk: buffer.toString('utf-8'),
+    nextOffset: stats.size,
+  };
+}
+
+function inferCompletedFromLogs(state: RunState): boolean {
+  return state.logs.some((entry) => entry.phase.toUpperCase() === 'DONE' && entry.message.includes('Total duration:'));
+}
+
+function finalizeBackgroundRun(runId: string, state: RunState) {
+  if (state.status !== 'running') return;
+
+  state.finishedAt = Date.now();
+  if (inferCompletedFromLogs(state)) {
+    state.status = 'completed';
+    for (const p of PIPELINE_PHASES) {
+      if (state.phases[p] === 'active') state.phases[p] = 'completed';
+    }
+  } else {
+    state.status = 'failed';
+    for (const p of PIPELINE_PHASES) {
+      if (state.phases[p] === 'active') state.phases[p] = 'failed';
+    }
+  }
+
+  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+  sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status });
+  persistRunState(state);
+}
+
+function stopPolling(runId: string) {
+  const active = activeRuns.get(runId);
+  if (!active?.logPoller) return;
+  clearInterval(active.logPoller);
+  active.logPoller = null;
+}
+
+function startBackgroundLogPolling(runId: string, state: RunState) {
+  const active = activeRuns.get(runId);
+  if (!active || active.logPoller || !state.logFilePath) return;
+
+  const poll = () => {
+    const current = activeRuns.get(runId);
+    if (!current) return;
+    if (state.status !== 'running') {
+      stopPolling(runId);
+      return;
+    }
+
+    try {
+      const { chunk, nextOffset } = readNewLogChunk(state.logFilePath!, state.logFileOffset);
+      state.logFileOffset = nextOffset;
+
+      if (chunk) {
+        const combined = current.logLineBuffer + chunk;
+        const lines = combined.split('\n');
+        current.logLineBuffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const entry = parseLine(line);
+          if (!entry) continue;
+          if (entry.phase === 'INIT' && entry.message.startsWith('Target branch:')) {
+            state.branchName = entry.message.replace('Target branch:', '').trim();
+          }
+          handleLogEntry(runId, entry, state);
+        }
+      }
+
+      if (!isProcessAlive(state.pid)) {
+        if (current.logLineBuffer.trim()) {
+          const tailEntry = parseLine(current.logLineBuffer);
+          if (tailEntry) handleLogEntry(runId, tailEntry, state);
+          current.logLineBuffer = '';
+        }
+        stopPolling(runId);
+        finalizeBackgroundRun(runId, state);
+      }
+    } catch {
+      // Non-fatal: polling will retry in the next tick.
+    }
+  };
+
+  active.logPoller = setInterval(poll, 1000);
+  poll();
+}
+
 function loadPersistedRuns() {
   if (!fs.existsSync(RUN_HISTORY_PATH)) return;
   let didMigrateRunningStatus = false;
@@ -62,16 +188,35 @@ function loadPersistedRuns() {
         logs: Array.isArray(run.logs) ? run.logs : [],
       };
 
+      loadedRun.runMode = loadedRun.runMode ?? 'foreground';
+      loadedRun.background = loadedRun.background ?? loadedRun.runMode === 'background';
+      loadedRun.modelOverrides = loadedRun.modelOverrides ?? null;
+      loadedRun.planText = loadedRun.planText ?? null;
+      loadedRun.logFilePath = loadedRun.logFilePath ?? null;
+      loadedRun.logFileOffset = loadedRun.logFileOffset ?? 0;
+
       if (loadedRun.status === 'running') {
-        didMigrateRunningStatus = true;
-        loadedRun.status = 'stopped';
-        loadedRun.finishedAt = loadedRun.finishedAt ?? Date.now();
-        loadedRun.logs.push({
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          phase: 'INIT',
-          message: 'Run marked as stopped after app restart',
-          raw: '[INIT] Run marked as stopped after app restart',
-        });
+        if (loadedRun.runMode === 'background' && isProcessAlive(loadedRun.pid)) {
+          activeRuns.set(loadedRun.id, {
+            state: loadedRun,
+            process: null,
+            logPoller: null,
+            logLineBuffer: '',
+          });
+          if (loadedRun.logFilePath) {
+            startBackgroundLogPolling(loadedRun.id, loadedRun);
+          }
+        } else {
+          didMigrateRunningStatus = true;
+          loadedRun.status = 'stopped';
+          loadedRun.finishedAt = loadedRun.finishedAt ?? Date.now();
+          loadedRun.logs.push({
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            phase: 'INIT',
+            message: 'Run marked as stopped after app restart',
+            raw: '[INIT] Run marked as stopped after app restart',
+          });
+        }
       }
 
       persistedRuns.set(loadedRun.id, loadedRun);
@@ -150,6 +295,23 @@ function markPhaseCompleted(state: RunState, phase: string) {
 }
 
 function handleLogEntry(runId: string, entry: LogEntry, state: RunState) {
+  if (entry.phase.toUpperCase() === 'PLAN') {
+    const match = entry.message.match(PLAN_FILE_REGEX);
+    if (match) {
+      const planPath = match[1]?.trim();
+      if (planPath && fs.existsSync(planPath)) {
+        try {
+          const planText = fs.readFileSync(planPath, 'utf-8').trim();
+          if (planText) {
+            state.planText = planText;
+          }
+        } catch {
+          // Non-fatal: run can proceed without persisted plan text.
+        }
+      }
+    }
+  }
+
   state.logs.push(entry);
   if (state.logs.length > MAX_LOGS_PER_RUN) {
     state.logs.splice(0, state.logs.length - MAX_LOGS_PER_RUN);
@@ -222,9 +384,11 @@ export function startRun(options: RunOptions): string {
     OPENCODE_LOOP_NOTIFICATION_SOUND: String(config.notificationSound),
   };
 
-  // Build args — always foreground, the app manages concurrency
+  const runMode = options.background ? 'background' : 'foreground';
+
+  // Build args
   const args = [
-    '--fg',
+    runMode === 'background' ? '--bg' : '--fg',
     '--log-opencode',
     '--config',
     path.join(os.homedir(), '.opencode-loop.conf'),
@@ -232,12 +396,9 @@ export function startRun(options: RunOptions): string {
     options.repoPath,
   ];
 
-  // Handle skip plan
-  let planTempFile: string | null = null;
   if (options.skipPlan && options.planText) {
-    planTempFile = path.join(os.tmpdir(), `opencode-plan-${runId}.md`);
-    fs.writeFileSync(planTempFile, options.planText, 'utf-8');
-    args.push('--plan-file', planTempFile);
+    env.OPENCODE_LOOP_PLAN_TEXT = options.planText;
+    args.push('--skip-plan');
   }
 
   // Add the prompt
@@ -260,17 +421,23 @@ export function startRun(options: RunOptions): string {
     finishedAt: null,
     pid: null,
     skipPlan: options.skipPlan,
+    background: !!options.background,
+    modelOverrides: options.modelOverrides ?? null,
+    planText: options.skipPlan ? options.planText?.trim() || null : null,
+    runMode,
+    logFilePath: null,
+    logFileOffset: 0,
   };
 
   const child = spawn('bash', [scriptPath, ...args], {
     env,
     cwd: options.repoPath,
-    detached: true,
+    detached: runMode === 'foreground',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   state.pid = child.pid ?? null;
-  activeRuns.set(runId, { state, process: child });
+  activeRuns.set(runId, { state, process: child, logPoller: null, logLineBuffer: '' });
   persistRunState(state);
 
   // Send initial state
@@ -285,6 +452,20 @@ export function startRun(options: RunOptions): string {
     stdoutBuffer = lines.pop() || '';
     for (const line of lines) {
       if (!line.trim()) continue;
+
+      const bgBootstrap = line.match(BG_BOOTSTRAP_REGEX);
+      if (bgBootstrap) {
+        state.logFilePath = bgBootstrap[1].trim();
+        state.pid = Number(bgBootstrap[2]);
+        if (!Number.isFinite(state.pid) || state.pid <= 0) {
+          state.pid = null;
+        }
+        persistRunState(state);
+        sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+        startBackgroundLogPolling(runId, state);
+        continue;
+      }
+
       const entry = parseLine(line);
       if (entry) {
         // Detect branch name
@@ -320,13 +501,23 @@ export function startRun(options: RunOptions): string {
       if (entry) handleLogEntry(runId, entry, state);
     }
 
+    if (state.runMode === 'background') {
+      if (code !== 0 && state.status === 'running') {
+        state.status = 'failed';
+        state.finishedAt = Date.now();
+        sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+        sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status });
+        persistRunState(state);
+      }
+      return;
+    }
+
     state.finishedAt = Date.now();
 
     if (state.status === 'stopped') {
       // Already marked as stopped
     } else if (code === 0) {
       state.status = 'completed';
-      // Mark remaining active phases as completed
       for (const p of PIPELINE_PHASES) {
         if (state.phases[p] === 'active') state.phases[p] = 'completed';
       }
@@ -340,16 +531,10 @@ export function startRun(options: RunOptions): string {
       );
     } else {
       state.status = 'failed';
-      // Mark active phases as failed
       for (const p of PIPELINE_PHASES) {
         if (state.phases[p] === 'active') state.phases[p] = 'failed';
       }
       showNotification('CodeLoop', `Run failed (exit code ${code})`);
-    }
-
-    // Clean up temp plan file
-    if (planTempFile && fs.existsSync(planTempFile)) {
-      try { fs.unlinkSync(planTempFile); } catch { /* ignore */ }
     }
 
     sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
@@ -370,30 +555,46 @@ export function startRun(options: RunOptions): string {
 
 export function stopRun(runId: string): boolean {
   const run = activeRuns.get(runId);
-  if (!run || run.state.status !== 'running') return false;
+  const persisted = persistedRuns.get(runId);
+  if (!run && (!persisted || persisted.status !== 'running')) return false;
 
-  run.state.status = 'stopped';
-  run.state.finishedAt = Date.now();
-  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...run.state } });
-  persistRunState(run.state);
+  const targetState = run?.state ?? persisted!;
+  if (targetState.status !== 'running') return false;
+
+  targetState.status = 'stopped';
+  targetState.finishedAt = Date.now();
+  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...targetState } });
+  persistRunState(targetState);
+
+  stopPolling(runId);
+
+  const pid = targetState.pid;
 
   try {
-    // Kill process group first so child/sub-processes are terminated together.
-    if (run.process.pid) {
-      process.kill(-run.process.pid, 'SIGTERM');
+    if (pid) {
+      process.kill(-pid, 'SIGTERM');
       setTimeout(() => {
         const current = activeRuns.get(runId);
-        if (!current || current.state.status !== 'stopped') return;
+        const currentState = current?.state ?? persistedRuns.get(runId);
+        if (!currentState || currentState.status !== 'stopped') return;
         try {
-          process.kill(-run.process.pid!, 'SIGKILL');
+          process.kill(-pid, 'SIGKILL');
         } catch {
-          /* ignore */
+          try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
         }
       }, 3000);
+      if (run?.process) {
+        run.process.kill('SIGTERM');
+      } else {
+        process.kill(pid, 'SIGTERM');
+      }
     }
-    run.process.kill('SIGTERM');
   } catch {
-    try { run.process.kill('SIGKILL'); } catch { /* ignore */ }
+    if (run?.process) {
+      try { run.process.kill('SIGKILL'); } catch { /* ignore */ }
+    } else if (pid) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+    }
   }
   return true;
 }

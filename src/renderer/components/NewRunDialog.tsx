@@ -13,6 +13,7 @@ import { cn } from '@shared/lib/utils';
 
 interface NewRunDialogProps {
   config: AppConfig;
+  initialOptions?: Partial<RunOptions> | null;
   onStart: (options: RunOptions) => Promise<{ ok: boolean; error?: string }>;
   onClose: () => void;
 }
@@ -27,13 +28,17 @@ const MODEL_FIELDS: { key: keyof ModelConfig; label: string }[] = [
   { key: 'modelBranch', label: 'Branch' },
 ];
 
-export default function NewRunDialog({ config, onStart, onClose }: NewRunDialogProps) {
-  const [repoPath, setRepoPath] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [skipPlan, setSkipPlan] = useState(false);
-  const [planText, setPlanText] = useState('');
+export default function NewRunDialog({ config, initialOptions, onStart, onClose }: NewRunDialogProps) {
+  const [repoPath, setRepoPath] = useState(initialOptions?.repoPath ?? '');
+  const [prompt, setPrompt] = useState(initialOptions?.prompt ?? '');
+  const [skipPlan, setSkipPlan] = useState(initialOptions?.skipPlan ?? false);
+  const [background, setBackground] = useState(initialOptions?.background ?? false);
+  const [planText, setPlanText] = useState(initialOptions?.planText ?? '');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [modelOverrides, setModelOverrides] = useState<Partial<ModelConfig>>({});
+  const [modelOverrides, setModelOverrides] = useState<Partial<ModelConfig>>({
+    ...config.lastModelOverrides,
+    ...(initialOptions?.modelOverrides ?? {}),
+  });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +47,34 @@ export default function NewRunDialog({ config, onStart, onClose }: NewRunDialogP
     api().listModels().then(setAvailableModels);
   }, []);
 
+  useEffect(() => {
+    setRepoPath(initialOptions?.repoPath ?? '');
+    setPrompt(initialOptions?.prompt ?? '');
+    setSkipPlan(initialOptions?.skipPlan ?? false);
+    setBackground(initialOptions?.background ?? false);
+    setPlanText(initialOptions?.planText ?? '');
+    setModelOverrides({
+      ...config.lastModelOverrides,
+      ...(initialOptions?.modelOverrides ?? {}),
+    });
+    setError(null);
+  }, [config.lastModelOverrides, initialOptions]);
+
   const handleRepoChange = (path: string, _meta: RepoMeta | null) => {
     setRepoPath(path);
     setError(null);
+  };
+
+  const setOverride = (key: keyof ModelConfig, value: string) => {
+    setModelOverrides((prev) => {
+      const next = { ...prev };
+      if (value === config.models[key]) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+      return next;
+    });
   };
 
   const handleStart = async () => {
@@ -68,6 +98,7 @@ export default function NewRunDialog({ config, onStart, onClose }: NewRunDialogP
       repoPath: repoPath.trim(),
       prompt: prompt.trim(),
       skipPlan,
+      background,
       planText: skipPlan ? planText.trim() : undefined,
       modelOverrides: Object.keys(modelOverrides).length > 0 ? modelOverrides : undefined,
     };
@@ -104,6 +135,14 @@ export default function NewRunDialog({ config, onStart, onClose }: NewRunDialogP
               <p className="text-xs text-muted-foreground">Provide your own implementation plan</p>
             </div>
             <Switch checked={skipPlan} onCheckedChange={setSkipPlan} />
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Run in Background</Label>
+              <p className="text-xs text-muted-foreground">Keeps running even after app quit; logs still stream while app is open</p>
+            </div>
+            <Switch checked={background} onCheckedChange={setBackground} />
           </div>
 
           {/* Plan text area */}
@@ -146,12 +185,23 @@ export default function NewRunDialog({ config, onStart, onClose }: NewRunDialogP
 
             {showAdvanced && (
               <div className="mt-4 space-y-3 animate-in slide-in-from-top-2 fade-in duration-300 p-4 rounded-lg bg-muted/20 border border-border/50">
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setModelOverrides({})}
+                  >
+                    Reset to defaults
+                  </Button>
+                </div>
                 {MODEL_FIELDS.map(({ key, label }) => (
                   <div key={key} className="flex items-center justify-between gap-3">
                     <Label className="text-xs text-muted-foreground w-20 shrink-0">{label}</Label>
                     <Select
                       value={modelOverrides[key] || config.models[key]}
-                      onValueChange={(value) => setModelOverrides((prev) => ({ ...prev, [key]: value }))}
+                      onValueChange={(value) => setOverride(key, value)}
                     >
                       <SelectTrigger className="h-8 text-xs bg-background flex-1">
                         <SelectValue placeholder="Select model" />

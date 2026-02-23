@@ -2,16 +2,17 @@ import { useState, useEffect } from 'react';
 import PhaseTracker from './PhaseTracker';
 import LogViewer from './LogViewer';
 import api from '../lib/ipc';
-import type { RunState } from '@shared/types';
+import type { RunState, RunOptions } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { Badge } from '@shared/components/ui/badge';
 import { Card } from '@shared/components/ui/card';
-import { Play, Square, ExternalLink, Copy, CheckCircle2, XCircle, StopCircle, GitBranch, ChevronDown, ChevronRight } from 'lucide-react';
+import { Square, ExternalLink, Copy, CheckCircle2, XCircle, StopCircle, GitBranch, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 import { cn } from '@shared/lib/utils';
 
 interface RunPanelProps {
   run: RunState;
   onStop: (runId: string) => void;
+  onRerun: (options: RunOptions) => void;
 }
 
 function formatElapsed(startedAt: number, finishedAt: number | null): string {
@@ -59,7 +60,7 @@ function statusIndicator(status: RunState['status']) {
   }
 }
 
-export default function RunPanel({ run, onStop }: RunPanelProps) {
+export default function RunPanel({ run, onStop, onRerun }: RunPanelProps) {
   const [_tick, setTick] = useState(0);
   const [promptExpanded, setPromptExpanded] = useState(false);
 
@@ -85,6 +86,24 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
     navigator.clipboard.writeText(run.prompt);
   };
 
+  const planPhase = run.phases['PLAN'];
+  const canRerunWithPlan =
+    run.status === 'failed' &&
+    !!run.planText?.trim() &&
+    (planPhase === 'completed' || planPhase === 'skipped');
+
+  const handleRerun = () => {
+    if (!run.planText?.trim()) return;
+    onRerun({
+      repoPath: run.repoPath,
+      prompt: run.prompt,
+      skipPlan: true,
+      background: run.background,
+      planText: run.planText,
+      modelOverrides: run.modelOverrides ?? undefined,
+    });
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 pt-12 bg-background/50">
       {/* Header */}
@@ -100,6 +119,9 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
             )}
           </div>
           <div className="flex items-center gap-4">
+            {run.runMode === 'background' && run.status === 'running' && (
+              <Badge variant="outline" className="text-xs">Background</Badge>
+            )}
             {statusIndicator(run.status)}
             <span className="text-sm font-medium text-muted-foreground bg-muted/30 px-2.5 py-1 rounded-md">{elapsed}</span>
           </div>
@@ -131,7 +153,18 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
               className="h-8 text-xs shadow-sm hover:shadow-red-500/20 transition-all"
             >
               <Square className="w-3.5 h-3.5 mr-1.5 fill-current" />
-              Stop Run
+              {run.runMode === 'background' ? 'Terminate Run' : 'Stop Run'}
+            </Button>
+          )}
+          {canRerunWithPlan && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleRerun}
+              className="h-8 text-xs shadow-sm transition-all"
+            >
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+              Re-run from Plan
             </Button>
           )}
           {run.prUrl && (

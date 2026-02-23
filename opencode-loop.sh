@@ -75,6 +75,8 @@ SKIP_PLAN=0
 LOG_OPENCODE_DETAIL=0
 PLAN_TEXT=""
 PLAN_FILE_PATH=""
+PLAN_RUNTIME_DIR="${OPENCODE_LOOP_PLAN_DIR:-$HOME/.opencode-loop/plans}"
+PLAN_FILE_USED=""
 REPO_DIR=""
 USER_PROMPT=""
 
@@ -509,15 +511,39 @@ detect_repo_context() {
 
 generate_branch_name() {
   local branch_prompt
-  branch_prompt="Generate a short kebab-case slug (2-4 words, no prefix) summarizing this task: $USER_PROMPT"
+  branch_prompt="Generate a short kebab-case slug with exactly 2-3 concise words (no dates, no prefixes, no extra text) summarizing this task: $USER_PROMPT"
 
   local raw
   raw=$(retry_with_backoff opencode run -m "$MODEL_BRANCH" -- "$branch_prompt" || true)
   local cleaned
   cleaned=$(cleanup_text_output "$raw" | head -n 1 | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-*//' | sed 's/-*$//')
 
+  local compact=""
+  local token count
+  count=0
+  IFS='-' read -r -a _branch_tokens <<< "$cleaned"
+  for token in "${_branch_tokens[@]}"; do
+    [ -z "$token" ] && continue
+    if [[ "$token" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
+    case "$token" in
+      the|a|an|and|or|for|from|with|that|this|into|after|before|when|while|opencode|detailed|output|run)
+        continue
+        ;;
+    esac
+    token="${token:0:10}"
+    compact="${compact:+$compact-}$token"
+    count=$((count + 1))
+    if [ "$count" -ge 3 ]; then
+      break
+    fi
+  done
+
+  cleaned=$(echo "$compact" | cut -c1-28 | sed 's/-*$//')
+
   if [ -z "$cleaned" ]; then
-    cleaned="task-$(date +%s)"
+    cleaned="task-$RANDOM"
   fi
 
   BRANCH_NAME="opencode/$cleaned"
@@ -698,6 +724,20 @@ cleanup_workspace_on_success() {
   fi
 }
 
+ensure_plan_runtime_dir() {
+  mkdir -p "$PLAN_RUNTIME_DIR"
+  if [ ! -f "$PLAN_RUNTIME_DIR/.gitignore" ]; then
+    printf '*\n!.gitignore\n' > "$PLAN_RUNTIME_DIR/.gitignore"
+  fi
+}
+
+cleanup_plan_file() {
+  if [ -n "$PLAN_FILE_USED" ] && [ -f "$PLAN_FILE_USED" ]; then
+    log "CLEANUP" "Removing runtime plan file: $PLAN_FILE_USED"
+    rm -f "$PLAN_FILE_USED"
+  fi
+}
+
 clone_and_prepare_repo() {
   mkdir -p "$WORKSPACE_ROOT"
 
@@ -763,7 +803,9 @@ run_pipeline() {
 
   local prompt_file plan_file implement_prompt_file review_file diff_file commit_diff_file pr_diff_file
   prompt_file=$(mktemp)
-  plan_file="$TARGET_DIR/.opencode-plan.md"
+  ensure_plan_runtime_dir
+  plan_file=$(mktemp "$PLAN_RUNTIME_DIR/plan-XXXXXX.md")
+  PLAN_FILE_USED="$plan_file"
   implement_prompt_file=$(mktemp)
   review_file=$(mktemp)
   diff_file=$(mktemp)
@@ -783,6 +825,7 @@ run_pipeline() {
       log "PLAN" "Error: --skip-plan requires --plan-file or OPENCODE_LOOP_PLAN_TEXT"
       return 1
     fi
+    log "PLAN" "Plan saved to $plan_file"
   else
     phase_start=$(date +%s)
     log "PLAN" "Starting planning phase with model $MODEL_PLAN"
@@ -1097,8 +1140,10 @@ main() {
   log "INIT" "Workspace dir: $TARGET_DIR"
 
   if run_pipeline; then
+    cleanup_plan_file
     notify_success "$PR_URL"
   else
+    cleanup_plan_file
     notify_error "OpenCode Loop failed. Check log: $LOG_FILE"
     exit 1
   fi
