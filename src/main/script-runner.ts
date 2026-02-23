@@ -186,6 +186,7 @@ export function startRun(options: RunOptions): string {
   const child = spawn('bash', [scriptPath, ...args], {
     env,
     cwd: options.repoPath,
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -241,7 +242,9 @@ export function startRun(options: RunOptions): string {
 
     state.finishedAt = Date.now();
 
-    if (code === 0) {
+    if (state.status === 'stopped') {
+      // Already marked as stopped
+    } else if (code === 0) {
       state.status = 'completed';
       // Mark remaining active phases as completed
       for (const p of PIPELINE_PHASES) {
@@ -255,8 +258,6 @@ export function startRun(options: RunOptions): string {
           if (state.prUrl) shell.openExternal(state.prUrl);
         }
       );
-    } else if (state.status === 'stopped') {
-      // Already marked as stopped
     } else {
       state.status = 'failed';
       // Mark active phases as failed
@@ -290,10 +291,22 @@ export function stopRun(runId: string): boolean {
   if (!run || run.state.status !== 'running') return false;
 
   run.state.status = 'stopped';
+  run.state.finishedAt = Date.now();
+  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...run.state } });
+
   try {
-    // Kill process group
+    // Kill process group first so child/sub-processes are terminated together.
     if (run.process.pid) {
       process.kill(-run.process.pid, 'SIGTERM');
+      setTimeout(() => {
+        const current = activeRuns.get(runId);
+        if (!current || current.state.status !== 'stopped') return;
+        try {
+          process.kill(-run.process.pid!, 'SIGKILL');
+        } catch {
+          /* ignore */
+        }
+      }, 3000);
     }
     run.process.kill('SIGTERM');
   } catch {
