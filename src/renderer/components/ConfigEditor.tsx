@@ -81,14 +81,6 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
     }
   };
 
-  const handlePickScriptPath = async () => {
-    const result = await api().pickFolder();
-    if (result && 'path' in result) {
-      const possibleScript = result.path + '/opencode-loop.sh';
-      setDraft((prev) => ({ ...prev, scriptPath: possibleScript }));
-    }
-  };
-
   return (
     <div className="flex-1 overflow-y-auto pt-12 bg-background/50">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
@@ -142,22 +134,6 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
                     className="font-mono text-sm bg-background/50"
                   />
                   <Button variant="outline" onClick={handlePickWorkspaceRoot} className="shrink-0">
-                    <FolderOpen className="w-4 h-4 mr-2" />
-                    Browse
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Script Path</Label>
-                <p className="text-xs text-muted-foreground">Path to opencode-loop.sh</p>
-                <div className="flex gap-2">
-                  <Input
-                    value={draft.scriptPath}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, scriptPath: e.target.value }))}
-                    className="font-mono text-sm bg-background/50"
-                  />
-                  <Button variant="outline" onClick={handlePickScriptPath} className="shrink-0">
                     <FolderOpen className="w-4 h-4 mr-2" />
                     Browse
                   </Button>

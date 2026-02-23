@@ -66,7 +66,6 @@ export interface AppConfig {
   retryDelays: number[];
   notificationSound: boolean;
   recentRepos: string[];
-  scriptPath: string;
 }
 
 export interface RepoMeta {

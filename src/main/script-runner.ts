@@ -5,7 +5,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Anser from 'anser';
 import { sendToRenderer, showNotification } from './index';
-import { loadConfig, addRecentRepo } from './config-manager';
+import { loadConfig, addRecentRepo, resolveScriptPath } from './config-manager';
 import { shell } from 'electron';
 import type {
   RunState,
@@ -201,7 +201,7 @@ export function startRun(options: RunOptions): string {
   // Add to recent repos
   addRecentRepo(config, options.repoPath);
 
-  const scriptPath = config.scriptPath;
+  const scriptPath = resolveScriptPath();
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`Script not found: ${scriptPath}`);
   }

@@ -24,20 +24,21 @@ const DEFAULT_CONFIG: AppConfig = {
   retryDelays: [10, 30, 60],
   notificationSound: true,
   recentRepos: [],
-  scriptPath: '',
 };
 
-function resolveScriptPath(): string {
-  // Try to find the script relative to this app
+export function resolveScriptPath(): string {
   const candidates = [
-    path.resolve(__dirname, '../../../scripts/opencode-loop.sh'),
-    path.resolve(__dirname, '../../../../scripts/opencode-loop.sh'),
-    path.join(os.homedir(), 'custom_scripts/scripts/opencode-loop.sh'),
+    path.resolve(__dirname, '../../opencode-loop.sh'),
+    path.resolve(__dirname, '../../../opencode-loop.sh'),
+    path.resolve(process.cwd(), 'opencode-loop.sh'),
+    path.resolve(process.resourcesPath, 'opencode-loop.sh'),
   ];
+
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
-  return candidates[0]; // Return first candidate as default
+
+  return path.resolve(process.cwd(), 'opencode-loop.sh');
 }
 
 export function loadConfig(): AppConfig {
@@ -45,11 +46,12 @@ export function loadConfig(): AppConfig {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
+      const parsedWithoutScriptPath = { ...(parsed as Record<string, unknown>) };
+      delete parsedWithoutScriptPath.scriptPath;
       return {
         ...DEFAULT_CONFIG,
-        ...parsed,
-        models: { ...DEFAULT_MODELS, ...parsed.models },
-        scriptPath: parsed.scriptPath || resolveScriptPath(),
+        ...parsedWithoutScriptPath,
+        models: { ...DEFAULT_MODELS, ...(parsedWithoutScriptPath.models as Partial<ModelConfig> | undefined) },
       };
     }
   } catch {
@@ -57,7 +59,7 @@ export function loadConfig(): AppConfig {
   }
 
   // If no JSON config, try to import from existing bash config
-  const config = { ...DEFAULT_CONFIG, scriptPath: resolveScriptPath() };
+  const config = { ...DEFAULT_CONFIG };
 
   if (fs.existsSync(BASH_CONFIG_PATH)) {
     try {
