@@ -4,6 +4,40 @@ import path from 'path';
 import { registerIpcHandlers } from './ipc-handlers';
 
 let mainWindow: BrowserWindow | null = null;
+let isShuttingDown = false;
+
+function forceExitSoon() {
+  setTimeout(() => {
+    process.exit(0);
+  }, 2000).unref();
+}
+
+function shutdownApp() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  try {
+    app.quit();
+  } finally {
+    forceExitSoon();
+  }
+}
+
+function registerShutdownHandlers() {
+  process.on('SIGTERM', shutdownApp);
+  process.on('SIGINT', shutdownApp);
+  process.on('disconnect', shutdownApp);
+
+  process.on('message', (data) => {
+    if (data === 'graceful-exit') {
+      shutdownApp();
+    }
+  });
+
+  app.on('before-quit', () => {
+    isShuttingDown = true;
+  });
+}
 
 function resolveLogoPath() {
   const candidatePaths = [
@@ -75,6 +109,7 @@ export function showNotification(title: string, body: string, onClick?: () => vo
 }
 
 app.whenReady().then(() => {
+  registerShutdownHandlers();
   registerIpcHandlers();
   createWindow();
   applyAppIcon();
@@ -91,6 +126,11 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (isShuttingDown) {
+    app.quit();
+    return;
+  }
+
   // On macOS, keep the app running in the dock
   if (process.platform !== 'darwin') {
     app.quit();
