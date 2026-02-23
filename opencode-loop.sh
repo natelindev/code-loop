@@ -79,6 +79,8 @@ PLAN_RUNTIME_DIR="${OPENCODE_LOOP_PLAN_DIR:-$HOME/.opencode-loop/plans}"
 PLAN_FILE_USED=""
 REPO_DIR=""
 USER_PROMPT=""
+AUTO_APPROVE_EXTERNAL_DIRECTORY="false"
+OPENCODE_RUNTIME_CONFIG_HOME=""
 
 REPO_ROOT=""
 REPO=""
@@ -129,7 +131,8 @@ Environment variable overrides (take precedence over config file):
   OPENCODE_LOOP_MODEL_IMPLEMENT, OPENCODE_LOOP_MODEL_REVIEW,
   OPENCODE_LOOP_MODEL_FIX, OPENCODE_LOOP_MODEL_COMMIT,
   OPENCODE_LOOP_MODEL_PR, OPENCODE_LOOP_MODEL_BRANCH,
-  OPENCODE_LOOP_MAX_RETRIES, OPENCODE_LOOP_NOTIFICATION_SOUND
+  OPENCODE_LOOP_MAX_RETRIES, OPENCODE_LOOP_NOTIFICATION_SOUND,
+  OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY
 EOF
 }
 
@@ -164,6 +167,7 @@ if ! declare -p RETRY_DELAYS >/dev/null 2>&1; then
 fi
 
 NOTIFICATION_SOUND=true
+AUTO_APPROVE_EXTERNAL_DIRECTORY=false
 EOF
 
   chmod 600 "$target_config" || true
@@ -181,7 +185,7 @@ load_config() {
   fi
 
   # Ensure values from config file take precedence over pre-exported shell env vars.
-  unset WORKSPACE_ROOT MODEL_PLAN MODEL_IMPLEMENT MODEL_REVIEW MODEL_FIX MODEL_COMMIT MODEL_PR MODEL_BRANCH MAX_RETRIES NOTIFICATION_SOUND
+  unset WORKSPACE_ROOT MODEL_PLAN MODEL_IMPLEMENT MODEL_REVIEW MODEL_FIX MODEL_COMMIT MODEL_PR MODEL_BRANCH MAX_RETRIES NOTIFICATION_SOUND AUTO_APPROVE_EXTERNAL_DIRECTORY
   unset POST_CLONE_COMMANDS RETRY_DELAYS
 
   # shellcheck disable=SC1090
@@ -197,6 +201,7 @@ load_config() {
   MODEL_BRANCH="${MODEL_BRANCH:-$DEFAULT_MODEL_BRANCH}"
   MAX_RETRIES="${MAX_RETRIES:-3}"
   NOTIFICATION_SOUND="${NOTIFICATION_SOUND:-true}"
+  AUTO_APPROVE_EXTERNAL_DIRECTORY="${AUTO_APPROVE_EXTERNAL_DIRECTORY:-false}"
 
   if ! [[ "$MAX_RETRIES" =~ ^[0-9]+$ ]]; then
     MAX_RETRIES=3
@@ -227,6 +232,7 @@ load_config() {
   [ -n "${OPENCODE_LOOP_MODEL_BRANCH:-}" ] && MODEL_BRANCH="$OPENCODE_LOOP_MODEL_BRANCH"
   [ -n "${OPENCODE_LOOP_MAX_RETRIES:-}" ] && MAX_RETRIES="$OPENCODE_LOOP_MAX_RETRIES"
   [ -n "${OPENCODE_LOOP_NOTIFICATION_SOUND:-}" ] && NOTIFICATION_SOUND="$OPENCODE_LOOP_NOTIFICATION_SOUND"
+  [ -n "${OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY:-}" ] && AUTO_APPROVE_EXTERNAL_DIRECTORY="$OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY"
   [ -n "${OPENCODE_LOOP_LOG_OPENCODE_DETAIL:-}" ] && LOG_OPENCODE_DETAIL="$OPENCODE_LOOP_LOG_OPENCODE_DETAIL"
 
   case "$(printf '%s' "${LOG_OPENCODE_DETAIL:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -235,6 +241,15 @@ load_config() {
       ;;
     *)
       LOG_OPENCODE_DETAIL=0
+      ;;
+  esac
+
+  case "$(printf '%s' "${AUTO_APPROVE_EXTERNAL_DIRECTORY:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      AUTO_APPROVE_EXTERNAL_DIRECTORY="true"
+      ;;
+    *)
+      AUTO_APPROVE_EXTERNAL_DIRECTORY="false"
       ;;
   esac
 }
@@ -738,6 +753,44 @@ cleanup_plan_file() {
   fi
 }
 
+cleanup_opencode_runtime_config() {
+  if [ -n "$OPENCODE_RUNTIME_CONFIG_HOME" ] && [ -d "$OPENCODE_RUNTIME_CONFIG_HOME" ]; then
+    rm -rf "$OPENCODE_RUNTIME_CONFIG_HOME"
+    OPENCODE_RUNTIME_CONFIG_HOME=""
+  fi
+}
+
+setup_opencode_runtime_config() {
+  if [ "$AUTO_APPROVE_EXTERNAL_DIRECTORY" != "true" ]; then
+    return 0
+  fi
+
+  local source_config_dir runtime_root override_file merged_file
+  source_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+  runtime_root=$(mktemp -d)
+  OPENCODE_RUNTIME_CONFIG_HOME="$runtime_root"
+  mkdir -p "$OPENCODE_RUNTIME_CONFIG_HOME/opencode"
+
+  if [ -d "$source_config_dir" ]; then
+    cp -R "$source_config_dir/." "$OPENCODE_RUNTIME_CONFIG_HOME/opencode/" 2>/dev/null || true
+  fi
+
+  override_file="$OPENCODE_RUNTIME_CONFIG_HOME/opencode/opencode.json"
+  if [ -f "$override_file" ]; then
+    merged_file=$(mktemp)
+    if jq '.permission.external_directory = "allow"' "$override_file" > "$merged_file" 2>/dev/null; then
+      mv "$merged_file" "$override_file"
+    else
+      rm -f "$merged_file"
+      printf '{\n  "permission": {\n    "external_directory": "allow"\n  }\n}\n' > "$override_file"
+    fi
+  else
+    printf '{\n  "permission": {\n    "external_directory": "allow"\n  }\n}\n' > "$override_file"
+  fi
+
+  export XDG_CONFIG_HOME="$OPENCODE_RUNTIME_CONFIG_HOME"
+}
+
 clone_and_prepare_repo() {
   mkdir -p "$WORKSPACE_ROOT"
 
@@ -1133,11 +1186,21 @@ main() {
   fi
 
   setup_logging
+  trap cleanup_opencode_runtime_config EXIT
+
+  if ! setup_opencode_runtime_config; then
+    log "INIT" "Error: failed to prepare OpenCode runtime config override"
+    exit 1
+  fi
+
   log "INIT" "Starting OpenCode loop"
   log "INIT" "Repo: $REPO"
   log "INIT" "Main branch: $MAIN_BRANCH"
   log "INIT" "Target branch: $BRANCH_NAME"
   log "INIT" "Workspace dir: $TARGET_DIR"
+  if [ "$AUTO_APPROVE_EXTERNAL_DIRECTORY" = "true" ]; then
+    log "INIT" "External-directory access auto-approval enabled"
+  fi
 
   if run_pipeline; then
     cleanup_plan_file

@@ -382,6 +382,7 @@ export function startRun(options: RunOptions): string {
     OPENCODE_LOOP_MODEL_BRANCH: mergedModels.modelBranch,
     OPENCODE_LOOP_MAX_RETRIES: String(config.maxRetries),
     OPENCODE_LOOP_NOTIFICATION_SOUND: String(config.notificationSound),
+    OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY: String(config.autoApproveExternalDirectory),
   };
 
   const runMode = options.background ? 'background' : 'foreground';

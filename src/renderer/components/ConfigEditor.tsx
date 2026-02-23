@@ -171,6 +171,20 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
                   </div>
                 </div>
               </div>
+
+              <div className="space-y-3">
+                <Label>External Directory Access</Label>
+                <p className="text-xs text-muted-foreground">Automatically approve OpenCode file access outside the current working folder</p>
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={draft.autoApproveExternalDirectory}
+                    onCheckedChange={(checked) =>
+                      setDraft((prev) => ({ ...prev, autoApproveExternalDirectory: checked }))
+                    }
+                  />
+                  <span className="text-sm font-medium">{draft.autoApproveExternalDirectory ? 'Auto-approve enabled' : 'Auto-approve disabled'}</span>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

@@ -24,6 +24,7 @@ const DEFAULT_CONFIG: AppConfig = {
   maxRetries: 3,
   retryDelays: [10, 30, 60],
   notificationSound: true,
+  autoApproveExternalDirectory: false,
   recentRepos: [],
 };
 
@@ -121,6 +122,7 @@ if ! declare -p RETRY_DELAYS >/dev/null 2>&1; then
 fi
 
 NOTIFICATION_SOUND=${config.notificationSound}
+AUTO_APPROVE_EXTERNAL_DIRECTORY=${config.autoApproveExternalDirectory}
 `;
 
   try {

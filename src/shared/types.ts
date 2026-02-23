@@ -73,6 +73,7 @@ export interface AppConfig {
   maxRetries: number;
   retryDelays: number[];
   notificationSound: boolean;
+  autoApproveExternalDirectory: boolean;
   recentRepos: string[];
 }
 
