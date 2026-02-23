@@ -952,8 +952,22 @@ run_pipeline() {
   else
     phase_start=$(date +%s)
     log "PLAN" "Starting planning phase with model $MODEL_PLAN"
-    local plan_raw plan_clean
-    plan_raw=$(retry_with_backoff opencode run --agent plan -m "$MODEL_PLAN" -- "$USER_PROMPT") || return 1
+    local plan_raw plan_clean plan_prompt
+    plan_prompt=$(cat <<EOF
+You are running in non-interactive planning mode.
+
+Hard rules:
+- Do not ask follow-up questions.
+- Do not output questions.
+- Do not ask for clarification.
+- If requirements are ambiguous or missing details, choose the best reasonable option and proceed.
+- Briefly note assumptions, then provide a concrete execution plan.
+
+User task:
+$USER_PROMPT
+EOF
+)
+    plan_raw=$(retry_with_backoff opencode run --agent plan -m "$MODEL_PLAN" -- "$plan_prompt") || return 1
     plan_clean=$(cleanup_text_output "$plan_raw")
     if [ -z "$plan_clean" ]; then
       log "PLAN" "Planning output was empty."
