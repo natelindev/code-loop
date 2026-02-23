@@ -1,6 +1,8 @@
-# CodeLoop (opencode-loop-app)
+# <img src="logo.png" width="32" height="32" align="center" /> CodeLoop (opencode-loop-app)
 
 CodeLoop is a sophisticated Electron-based desktop application that provides a modern, intuitive user interface for managing AI-powered code generation pipelines. It automates the entire software development lifecycle—from cloning a repository and creating an implementation plan to writing, reviewing, and fixing code, and finally submitting a pull request.
+
+![CodeLoop Screenshot](screenshot.png)
 
 At its core, CodeLoop orchestrates the `opencode-loop.sh` script to run multi-step pipelines using various large language models.
 
