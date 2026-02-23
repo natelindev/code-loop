@@ -1,4 +1,4 @@
-# <img src="logo.png" width="32" height="32" align="center" /> CodeLoop (opencode-loop-app)
+# <img src="logo.png" width="32" height="32" align="center" /> CodeLoop
 
 CodeLoop is a sophisticated Electron-based desktop application that provides a modern, intuitive user interface for managing AI-powered code generation pipelines. It automates the entire software development lifecycle—from cloning a repository and creating an implementation plan to writing, reviewing, and fixing code, and finally submitting a pull request.
 
@@ -29,8 +29,8 @@ Before running CodeLoop, ensure you have the following installed:
 
 1.  **Clone this repository**:
     ```bash
-    git clone https://github.com/natelindev/opencode-loop-app.git
-    cd opencode-loop-app
+    git clone https://github.com/natelindev/code-loop.git
+    cd code-loop
     ```
 
 2.  **Install dependencies**:
@@ -45,7 +45,7 @@ Before running CodeLoop, ensure you have the following installed:
 
 ### Configuration
 
-On the first launch, CodeLoop will create a default configuration in `~/.opencode-loop-app.json`. You can manage these settings directly within the app's **Settings** panel:
+On the first launch, CodeLoop will create a default configuration in `~/.code-loop.json`. You can manage these settings directly within the app's **Settings** panel:
 - **Workspace Root**: The directory where repositories will be cloned and managed.
 - **Model Selection**: Choose different models for planning, implementing, reviewing, etc.
 - **Post-Clone Commands**: Custom scripts (like `pnpm i`) to run after cloning a repo.
