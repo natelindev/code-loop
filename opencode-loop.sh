@@ -364,6 +364,7 @@ retry_with_backoff() {
   local output
   local status
   local is_opencode_run=0
+  local streamed_output=0
 
   if [ "${1:-}" = "opencode" ] && [ "${2:-}" = "run" ]; then
     is_opencode_run=1
@@ -371,18 +372,30 @@ retry_with_backoff() {
 
   while [ "$attempt" -le "$MAX_RETRIES" ]; do
     status=0
-    output=$("$@" 2>&1) || status=$?
+
+    if [ "$LOG_OPENCODE_DETAIL" -eq 1 ] && [ "$is_opencode_run" -eq 1 ]; then
+      local stream_file
+      stream_file=$(mktemp)
+
+      # Stream opencode output live to stderr (so callers using command substitution still show logs)
+      # while also capturing full output for downstream parsing.
+      "$@" > >(tee "$stream_file" >&2) 2> >(tee -a "$stream_file" >&2) || status=$?
+      output=$(cat "$stream_file")
+      rm -f "$stream_file"
+      streamed_output=1
+    else
+      output=$("$@" 2>&1) || status=$?
+      streamed_output=0
+    fi
 
     if [ "$status" -eq 0 ]; then
-      if [ "$LOG_OPENCODE_DETAIL" -eq 1 ] && [ "$is_opencode_run" -eq 1 ] && [ -n "$output" ]; then
-        log "OPENCODE" "Detailed output from opencode run:"
-        printf '%s\n' "$output" >&2
-      fi
       echo "$output"
       return 0
     fi
 
-    echo "$output" >&2
+    if [ "$streamed_output" -ne 1 ]; then
+      echo "$output" >&2
+    fi
 
     if ! is_network_error "$output"; then
       return "$status"
