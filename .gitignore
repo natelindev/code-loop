@@ -1,5 +1,45 @@
+# Node.js
 node_modules/
 dist/
 dist-electron/
 *.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+release/
+out/
+
+# OS-specific files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs and debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+logs/
+
+# IDE files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+/tmp/
+.temp/
