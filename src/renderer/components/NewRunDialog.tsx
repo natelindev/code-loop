@@ -145,15 +145,15 @@ export default function NewRunDialog({ config, onStart, onClose }: NewRunDialogP
             </button>
 
             {showAdvanced && (
-              <div className="mt-4 grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 fade-in duration-300 p-4 rounded-lg bg-muted/20 border border-border/50">
+              <div className="mt-4 space-y-3 animate-in slide-in-from-top-2 fade-in duration-300 p-4 rounded-lg bg-muted/20 border border-border/50">
                 {MODEL_FIELDS.map(({ key, label }) => (
-                  <div key={key} className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">{label}</Label>
+                  <div key={key} className="flex items-center justify-between gap-3">
+                    <Label className="text-xs text-muted-foreground w-20 shrink-0">{label}</Label>
                     <Select
                       value={modelOverrides[key] || config.models[key]}
                       onValueChange={(value) => setModelOverrides((prev) => ({ ...prev, [key]: value }))}
                     >
-                      <SelectTrigger className="h-8 text-xs bg-background">
+                      <SelectTrigger className="h-8 text-xs bg-background flex-1">
                         <SelectValue placeholder="Select model" />
                       </SelectTrigger>
                       <SelectContent>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron';
+import { app, BrowserWindow, Notification, nativeTheme } from 'electron';
 import path from 'path';
 import { registerIpcHandlers } from './ipc-handlers';
 
@@ -12,7 +12,7 @@ function createWindow() {
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
-    backgroundColor: '#030712',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#030712' : '#ffffff',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

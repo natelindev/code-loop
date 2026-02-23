@@ -96,7 +96,7 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Configure the OpenCode Loop pipeline defaults
+              Configure the CodeLoop pipeline defaults
             </p>
           </div>
           <Button
@@ -111,7 +111,7 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
                 Saving...
               </span>
             ) : saved ? (
-              <span className="flex items-center gap-2 text-green-500">
+              <span className="flex items-center gap-2 text-green-600 dark:text-green-400">
                 <CheckCircle2 className="w-4 h-4" />
                 Saved
               </span>
@@ -211,16 +211,18 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
                   Loading available models...
                 </div>
               ) : (
-                <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-4">
                   {MODEL_FIELDS.map(({ key, label, description }) => (
-                    <div key={key} className="space-y-2">
-                      <Label>{label}</Label>
-                      <p className="text-xs text-muted-foreground h-8">{description}</p>
+                    <div key={key} className="flex items-center justify-between gap-4 py-2 border-b border-border/30 last:border-0">
+                      <div className="flex-1 min-w-0">
+                        <Label className="text-sm">{label}</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                      </div>
                       <Select
                         value={draft.models[key]}
                         onValueChange={(value) => updateModel(key, value)}
                       >
-                        <SelectTrigger className="bg-background/50">
+                        <SelectTrigger className="w-[240px] bg-background/50">
                           <SelectValue placeholder="Select model" />
                         </SelectTrigger>
                         <SelectContent>

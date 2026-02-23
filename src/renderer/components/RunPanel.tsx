@@ -6,7 +6,8 @@ import type { RunState } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { Badge } from '@shared/components/ui/badge';
 import { Card } from '@shared/components/ui/card';
-import { Play, Square, ExternalLink, Copy, CheckCircle2, XCircle, StopCircle, GitBranch } from 'lucide-react';
+import { Play, Square, ExternalLink, Copy, CheckCircle2, XCircle, StopCircle, GitBranch, ChevronDown, ChevronRight } from 'lucide-react';
+import { cn } from '@shared/lib/utils';
 
 interface RunPanelProps {
   run: RunState;
@@ -29,28 +30,28 @@ function statusIndicator(status: RunState['status']) {
   switch (status) {
     case 'running':
       return (
-        <Badge variant="secondary" className="bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border-blue-500/20 gap-1.5 py-1">
+        <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 border-blue-500/20 gap-1.5 py-1">
           <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
           Running
         </Badge>
       );
     case 'completed':
       return (
-        <Badge variant="secondary" className="bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20 gap-1.5 py-1">
+        <Badge variant="secondary" className="bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 border-green-500/20 gap-1.5 py-1">
           <CheckCircle2 className="w-3.5 h-3.5" />
           Completed
         </Badge>
       );
     case 'failed':
       return (
-        <Badge variant="destructive" className="bg-red-500/10 text-red-500 hover:bg-red-500/20 border-red-500/20 gap-1.5 py-1">
+        <Badge variant="destructive" className="bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border-red-500/20 gap-1.5 py-1">
           <XCircle className="w-3.5 h-3.5" />
           Failed
         </Badge>
       );
     case 'stopped':
       return (
-        <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border-yellow-500/20 gap-1.5 py-1">
+        <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20 border-yellow-500/20 gap-1.5 py-1">
           <StopCircle className="w-3.5 h-3.5" />
           Stopped
         </Badge>
@@ -60,6 +61,7 @@ function statusIndicator(status: RunState['status']) {
 
 export default function RunPanel({ run, onStop }: RunPanelProps) {
   const [_tick, setTick] = useState(0);
+  const [promptExpanded, setPromptExpanded] = useState(false);
 
   useEffect(() => {
     if (run.status !== 'running') return;
@@ -98,7 +100,22 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
             <span className="text-sm font-medium text-muted-foreground bg-muted/30 px-2.5 py-1 rounded-md">{elapsed}</span>
           </div>
         </div>
-        <p className="text-sm text-muted-foreground/90 truncate max-w-3xl">{run.prompt}</p>
+        <button
+          onClick={() => setPromptExpanded(!promptExpanded)}
+          className="flex items-start gap-1.5 text-left group/prompt w-full"
+        >
+          {promptExpanded ? (
+            <ChevronDown className="w-3.5 h-3.5 mt-0.5 text-muted-foreground/60 shrink-0" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5 mt-0.5 text-muted-foreground/60 shrink-0" />
+          )}
+          <p className={cn(
+            "text-sm text-muted-foreground/90 max-w-3xl transition-all",
+            promptExpanded ? "whitespace-pre-wrap" : "truncate"
+          )}>
+            {run.prompt}
+          </p>
+        </button>
 
         {/* Action bar */}
         <div className="flex items-center gap-2 mt-4">
@@ -150,8 +167,8 @@ export default function RunPanel({ run, onStop }: RunPanelProps) {
                 <CheckCircle2 className="w-5 h-5 text-green-500" />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-green-500">Pull Request Created Successfully</h3>
-                <p className="text-xs text-green-500/70 mt-0.5 font-mono">{run.prUrl}</p>
+                <h3 className="text-sm font-semibold text-green-600 dark:text-green-400">Pull Request Created Successfully</h3>
+                <p className="text-xs text-green-600/70 dark:text-green-400/70 mt-0.5 font-mono">{run.prUrl}</p>
               </div>
             </div>
             <Button

@@ -3,7 +3,7 @@ import { Button } from '@shared/components/ui/button';
 import { ScrollArea } from '@shared/components/ui/scroll-area';
 import { Separator } from '@shared/components/ui/separator';
 import { Badge } from '@shared/components/ui/badge';
-import { Settings, Play, Plus, Activity, CheckCircle2, XCircle, StopCircle } from 'lucide-react';
+import { Settings, Play, Plus, RefreshCw, CheckCircle2, XCircle, StopCircle } from 'lucide-react';
 import { cn } from '@shared/lib/utils';
 
 interface SidebarProps {
@@ -28,28 +28,28 @@ function statusBadge(status: RunState['status']) {
   switch (status) {
     case 'running':
       return (
-        <Badge variant="secondary" className="bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border-blue-500/20 gap-1">
+        <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 border-blue-500/20 gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
           Running
         </Badge>
       );
     case 'completed':
       return (
-        <Badge variant="secondary" className="bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20 gap-1">
+        <Badge variant="secondary" className="bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-500/20 border-green-500/20 gap-1">
           <CheckCircle2 className="w-3 h-3" />
           Done
         </Badge>
       );
     case 'failed':
       return (
-        <Badge variant="destructive" className="bg-red-500/10 text-red-500 hover:bg-red-500/20 border-red-500/20 gap-1">
+        <Badge variant="destructive" className="bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border-red-500/20 gap-1">
           <XCircle className="w-3 h-3" />
           Failed
         </Badge>
       );
     case 'stopped':
       return (
-        <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border-yellow-500/20 gap-1">
+        <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20 border-yellow-500/20 gap-1">
           <StopCircle className="w-3 h-3" />
           Stopped
         </Badge>
@@ -74,8 +74,8 @@ export default function Sidebar({
       {/* Header / drag region spacer */}
       <div className="pt-12 px-4 pb-4 flex items-center justify-between">
         <h1 className="text-sm font-bold text-foreground tracking-wider flex items-center gap-2">
-          <Activity className="w-4 h-4 text-primary" />
-          OPENCODE LOOP
+          <RefreshCw className="w-4 h-4 text-primary" />
+          CODELOOP
         </h1>
         <Button
           onClick={onNewRun}
@@ -185,32 +185,32 @@ function RunItem({
     <button
       onClick={onClick}
       className={cn(
-        "w-full text-left px-3 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden",
+        "w-full text-left px-3 py-2 rounded-lg transition-all duration-200 group relative border-b border-border/30 last:border-0",
         selected
-          ? "bg-primary/10 ring-1 ring-primary/20 shadow-sm"
+          ? "bg-accent"
           : "hover:bg-muted/80"
       )}
     >
       {selected && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-l-xl" />
+        <div className="absolute left-0 top-1 bottom-1 w-1 bg-primary rounded-full" />
       )}
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-center justify-between mb-1">
         <span className={cn(
-          "text-sm font-semibold truncate max-w-[130px] transition-colors",
+          "text-sm font-semibold truncate flex-1 mr-2 transition-colors",
           selected ? "text-primary" : "text-foreground group-hover:text-primary/80"
         )}>
           {run.repoName}
         </span>
         {statusBadge(run.status)}
       </div>
-      <p className="text-xs text-muted-foreground truncate mb-2 group-hover:text-foreground/70 transition-colors">
+      <p className="text-xs text-muted-foreground truncate mb-1.5 group-hover:text-foreground/70 transition-colors">
         {run.prompt}
       </p>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+        <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
           {run.currentPhase || 'INIT'}
         </span>
-        <span className="text-[10px] text-muted-foreground/70 font-medium">
+        <span className="text-xs text-muted-foreground/70 font-medium">
           {formatElapsed(run.startedAt, run.finishedAt)}
         </span>
       </div>

@@ -249,7 +249,7 @@ export function startRun(options: RunOptions): string {
       }
 
       showNotification(
-        'OpenCode Loop',
+        'CodeLoop',
         state.prUrl ? `PR ready: ${state.prUrl}` : 'Run completed successfully',
         () => {
           if (state.prUrl) shell.openExternal(state.prUrl);
@@ -263,7 +263,7 @@ export function startRun(options: RunOptions): string {
       for (const p of PIPELINE_PHASES) {
         if (state.phases[p] === 'active') state.phases[p] = 'failed';
       }
-      showNotification('OpenCode Loop', `Run failed (exit code ${code})`);
+      showNotification('CodeLoop', `Run failed (exit code ${code})`);
     }
 
     // Clean up temp plan file

@@ -1,7 +1,7 @@
 {
-  "name": "opencode-loop-app",
+  "name": "code-loop",
   "version": "1.0.0",
-  "description": "Electron UI for opencode-loop pipeline",
+  "description": "Electron UI for managing AI-powered code generation pipelines",
   "packageManager": "pnpm@10.26.2",
   "main": "dist-electron/main/index.js",
   "scripts": {

@@ -7,6 +7,7 @@ import { useRuns } from './hooks/useRuns';
 import { useConfig } from './hooks/useConfig';
 import { Button } from '@shared/components/ui/button';
 import { ModeToggle } from './components/theme/mode-toggle';
+import { RefreshCw } from 'lucide-react';
 
 type View = 'runs' | 'config';
 
@@ -53,7 +54,9 @@ export default function App() {
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <div className="text-center animate-in fade-in zoom-in duration-500">
-              <div className="text-6xl mb-4">⚡</div>
+              <div className="mb-4 flex justify-center">
+                <RefreshCw className="w-14 h-14 text-muted-foreground/40" />
+              </div>
               <h2 className="text-xl font-medium mb-2 text-foreground">No run selected</h2>
               <p className="text-sm mb-6">Start a new run or select one from the sidebar</p>
               <Button onClick={() => setShowNewRun(true)} size="lg" className="transition-all hover:scale-105">
