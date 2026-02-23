@@ -3,6 +3,7 @@ import { loadConfig, saveConfig } from './config-manager';
 import { startRun, stopRun, getRunState, listRuns } from './script-runner';
 import { validateRepo, getRepoMeta, listSupportedModels } from './repo-scanner';
 import { getMainWindow } from './index';
+import { checkLaunchRequirements } from './launch-requirements';
 import { IPC } from '../shared/types';
 import type { AppConfig, RunOptions } from '../shared/types';
 
@@ -72,5 +73,10 @@ export function registerIpcHandlers() {
   // Models
   ipcMain.handle(IPC.MODELS_LIST, async () => {
     return listSupportedModels();
+  });
+
+  // Launch checks
+  ipcMain.handle(IPC.APP_LAUNCH_REQUIREMENTS, () => {
+    return checkLaunchRequirements();
   });
 }

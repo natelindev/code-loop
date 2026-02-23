@@ -25,6 +25,7 @@ const DEFAULT_CONFIG: AppConfig = {
   retryDelays: [10, 30, 60],
   notificationSound: true,
   autoApproveExternalDirectory: false,
+  launchChecksPassed: false,
   recentRepos: [],
 };
 

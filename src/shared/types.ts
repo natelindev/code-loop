@@ -74,6 +74,7 @@ export interface AppConfig {
   retryDelays: number[];
   notificationSound: boolean;
   autoApproveExternalDirectory: boolean;
+  launchChecksPassed: boolean;
   recentRepos: string[];
 }
 
@@ -84,6 +85,20 @@ export interface RepoMeta {
   nameWithOwner: string;
   remoteUrl: string;
   mainBranch: string;
+}
+
+export interface ToolReadiness {
+  installed: boolean;
+  authenticated: boolean;
+  hint: string;
+  details: string | null;
+}
+
+export interface LaunchRequirements {
+  ready: boolean;
+  checkedAt: number;
+  opencode: ToolReadiness;
+  gh: ToolReadiness;
 }
 
 // IPC channel names
@@ -104,4 +119,5 @@ export const IPC = {
   REPO_PICK_FOLDER: 'repo:pick-folder',
   SHELL_OPEN_URL: 'shell:open-url',
   MODELS_LIST: 'models:list',
+  APP_LAUNCH_REQUIREMENTS: 'app:launch-requirements',
 } as const;

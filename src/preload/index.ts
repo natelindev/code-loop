@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '@shared/types';
-import type { AppConfig, RunOptions, RunState, LogEntry, RepoMeta } from '@shared/types';
+import type { AppConfig, RunOptions, RunState, LogEntry, RepoMeta, LaunchRequirements } from '@shared/types';
 
 const api = {
   // Config
@@ -60,6 +60,9 @@ const api = {
 
   // Models
   listModels: (): Promise<string[]> => ipcRenderer.invoke(IPC.MODELS_LIST),
+
+  // Startup checks
+  checkLaunchRequirements: (): Promise<LaunchRequirements> => ipcRenderer.invoke(IPC.APP_LAUNCH_REQUIREMENTS),
 };
 
 export type ElectronAPI = typeof api;

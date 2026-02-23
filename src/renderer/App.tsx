@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import RunPanel from './components/RunPanel';
 import NewRunDialog from './components/NewRunDialog';
 import ConfigEditor from './components/ConfigEditor';
+import LaunchRequirementsDialog from './components/LaunchRequirementsDialog';
 import { useRuns } from './hooks/useRuns';
 import { useConfig } from './hooks/useConfig';
-import type { RunOptions } from '@shared/types';
+import api from './lib/ipc';
+import type { RunOptions, LaunchRequirements } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { ModeToggle } from './components/theme/mode-toggle';
 import { RefreshCw } from 'lucide-react';
@@ -18,6 +20,58 @@ export default function App() {
   const [view, setView] = useState<View>('runs');
   const [showNewRun, setShowNewRun] = useState(false);
   const [newRunPreset, setNewRunPreset] = useState<Partial<RunOptions> | null>(null);
+  const [checkingLaunchRequirements, setCheckingLaunchRequirements] = useState(false);
+  const [launchRequirements, setLaunchRequirements] = useState<LaunchRequirements | null>(null);
+
+  const refreshLaunchRequirements = useCallback(async () => {
+    if (!config || config.launchChecksPassed) {
+      setCheckingLaunchRequirements(false);
+      setLaunchRequirements(null);
+      return;
+    }
+
+    setCheckingLaunchRequirements(true);
+    try {
+      const status = await api().checkLaunchRequirements();
+      setLaunchRequirements(status);
+      if (status.ready && !config.launchChecksPassed) {
+        await saveConfig({
+          ...config,
+          launchChecksPassed: true,
+        });
+      }
+    } catch {
+      setLaunchRequirements({
+        ready: false,
+        checkedAt: Date.now(),
+        opencode: {
+          installed: false,
+          authenticated: false,
+          hint: 'Unable to verify OpenCode CLI status',
+          details: 'Failed to run startup checks. Please ensure terminal commands are available and try again.',
+        },
+        gh: {
+          installed: false,
+          authenticated: false,
+          hint: 'Unable to verify GitHub CLI status',
+          details: 'Failed to run startup checks. Please ensure terminal commands are available and try again.',
+        },
+      });
+    } finally {
+      setCheckingLaunchRequirements(false);
+    }
+  }, [config, saveConfig]);
+
+  useEffect(() => {
+    if (!config) return;
+    if (config.launchChecksPassed) {
+      setCheckingLaunchRequirements(false);
+      setLaunchRequirements(null);
+      return;
+    }
+
+    void refreshLaunchRequirements();
+  }, [config, refreshLaunchRequirements]);
 
   if (configLoading || !config) {
     return (
@@ -109,6 +163,12 @@ export default function App() {
           }}
         />
       )}
+
+      <LaunchRequirementsDialog
+        requirements={launchRequirements}
+        checking={checkingLaunchRequirements}
+        onRecheck={refreshLaunchRequirements}
+      />
     </div>
   );
 }
