@@ -151,7 +151,7 @@ export function startRun(options: RunOptions): string {
   };
 
   // Build args — always foreground, the app manages concurrency
-  const args = ['--fg', '--config', path.join(os.homedir(), '.opencode-loop.conf'), '--repo-dir', options.repoPath];
+  const args = ['--fg', '--config', path.join(os.homedir(), '.opencode-loop.conf')];
 
   // Handle skip plan
   let planTempFile: string | null = null;
