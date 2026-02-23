@@ -1,10 +1,34 @@
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron';
+import { existsSync } from 'fs';
 import path from 'path';
 import { registerIpcHandlers } from './ipc-handlers';
 
 let mainWindow: BrowserWindow | null = null;
 
+function resolveLogoPath() {
+  const candidatePaths = [
+    path.join(__dirname, '../../', 'logo.png'),
+    path.join(process.resourcesPath, 'logo.png'),
+    path.join(process.resourcesPath, 'app.asar', 'logo.png'),
+  ];
+
+  return candidatePaths.find((p) => existsSync(p));
+}
+
+function applyAppIcon() {
+  const iconPath = resolveLogoPath();
+  if (!iconPath) return;
+
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(iconPath);
+  }
+
+  mainWindow?.setIcon(iconPath);
+}
+
 function createWindow() {
+  const iconPath = resolveLogoPath();
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -13,6 +37,7 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#030712' : '#ffffff',
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -52,6 +77,11 @@ export function showNotification(title: string, body: string, onClick?: () => vo
 app.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
+  applyAppIcon();
+
+  nativeTheme.on('updated', () => {
+    applyAppIcon();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
