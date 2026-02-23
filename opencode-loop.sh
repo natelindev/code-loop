@@ -87,6 +87,8 @@ REPO=""
 REPO_URL=""
 ORIGIN_REPO=""
 ORIGIN_OWNER=""
+PUSH_TARGET=""
+PUSH_BRANCH_OWNER=""
 MAIN_BRANCH=""
 BRANCH_NAME=""
 TARGET_DIR=""
@@ -467,6 +469,70 @@ parse_repo_from_url() {
   fi
 }
 
+resolve_repo_and_push_target() {
+  REPO=""
+  PUSH_TARGET=""
+  PUSH_BRANCH_OWNER=""
+
+  local remote_names=""
+  if git remote get-url origin >/dev/null 2>&1; then
+    remote_names="origin"
+  fi
+
+  local remote_name remote_url repo_candidate
+  for remote_name in $(git remote); do
+    [ "$remote_name" = "origin" ] && continue
+    if [ -n "$remote_names" ]; then
+      remote_names="$remote_names $remote_name"
+    else
+      remote_names="$remote_name"
+    fi
+  done
+
+  for remote_name in $remote_names; do
+    remote_url=$(git remote get-url "$remote_name" 2>/dev/null || true)
+    repo_candidate=$(parse_repo_from_url "$remote_url")
+    if [ -n "$repo_candidate" ]; then
+      REPO="$repo_candidate"
+      PUSH_TARGET="$remote_name"
+      PUSH_BRANCH_OWNER="${repo_candidate%%/*}"
+      break
+    fi
+  done
+
+  if [ -z "$REPO" ] && git remote get-url origin >/dev/null 2>&1; then
+    local origin_url origin_path upstream_remote upstream_url
+    origin_url=$(git remote get-url origin 2>/dev/null || true)
+    origin_path="$origin_url"
+    [[ "$origin_path" =~ ^file:// ]] && origin_path="${origin_path#file://}"
+
+    if [ -d "$origin_path/.git" ] || [ -f "$origin_path/HEAD" ]; then
+      for upstream_remote in $(git -C "$origin_path" remote); do
+        upstream_url=$(git -C "$origin_path" remote get-url "$upstream_remote" 2>/dev/null || true)
+        repo_candidate=$(parse_repo_from_url "$upstream_url")
+        if [ -n "$repo_candidate" ]; then
+          REPO="$repo_candidate"
+          PUSH_TARGET="$upstream_url"
+          PUSH_BRANCH_OWNER="${repo_candidate%%/*}"
+          break
+        fi
+      done
+    fi
+  fi
+
+  if [ -z "$REPO" ]; then
+    REPO=$(retry_with_backoff gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+    REPO=$(echo "$REPO" | tail -n 1 | trim)
+    if [ -n "$REPO" ]; then
+      PUSH_BRANCH_OWNER="${REPO%%/*}"
+    fi
+  fi
+
+  if [ -z "$PUSH_TARGET" ]; then
+    PUSH_TARGET="origin"
+  fi
+}
+
 wait_for_remote_branch() {
   local branch="$1"
   local max_attempts=6
@@ -489,23 +555,18 @@ wait_for_remote_branch() {
 }
 
 branch_has_commits_ahead() {
-  local base_branch="$1"
-  local head_branch="$2"
-
-  retry_with_backoff git fetch origin "$base_branch" "$head_branch" >/dev/null || return 1
+  local base_ref="$1"
+  local head_ref="$2"
 
   local ahead_count
-  ahead_count=$(git rev-list --count "origin/$base_branch..origin/$head_branch" 2>/dev/null || echo "0")
+  ahead_count=$(git rev-list --count "$base_ref..$head_ref" 2>/dev/null || echo "0")
   [ "$ahead_count" -gt 0 ]
 }
 
 detect_repo_context() {
   REPO_ROOT=$(git rev-parse --show-toplevel)
   REPO=$(retry_with_backoff gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
-  if [ -z "$REPO" ]; then
-    echo "Error: Could not detect current GitHub repository."
-    exit 1
-  fi
+  REPO=$(echo "$REPO" | tail -n 1 | trim)
 
   ORIGIN_REPO=$(parse_repo_from_url "$REPO_URL")
   if [ -n "$ORIGIN_REPO" ]; then
@@ -521,6 +582,15 @@ detect_repo_context() {
   if [ -z "$MAIN_BRANCH" ]; then
     MAIN_BRANCH="main"
     git show-ref --verify --quiet refs/heads/main || MAIN_BRANCH="master"
+  fi
+
+  if [ -z "$REPO" ] && [ -n "$ORIGIN_REPO" ]; then
+    REPO="$ORIGIN_REPO"
+  fi
+
+  if [ -z "$REPO" ]; then
+    echo "Error: Could not detect current GitHub repository."
+    exit 1
   fi
 }
 
@@ -882,11 +952,8 @@ run_pipeline() {
   else
     phase_start=$(date +%s)
     log "PLAN" "Starting planning phase with model $MODEL_PLAN"
-    local plan_prompt
-    plan_prompt="You are a planning agent. Analyze the codebase and create a detailed, step-by-step implementation plan for the following task. Output ONLY the plan, no code. The task is provided in the attached file."
-
     local plan_raw plan_clean
-    plan_raw=$(retry_with_backoff opencode run -m "$MODEL_PLAN" -f "$prompt_file" -- "$plan_prompt") || return 1
+    plan_raw=$(retry_with_backoff opencode run --agent plan -m "$MODEL_PLAN" -- "$USER_PROMPT") || return 1
     plan_clean=$(cleanup_text_output "$plan_raw")
     if [ -z "$plan_clean" ]; then
       log "PLAN" "Planning output was empty."
@@ -964,15 +1031,32 @@ Output ONLY the raw commit message text. No markdown, no backticks, no quotes, n
   git commit -m "$commit_msg" >/dev/null || return 1
 
   log "PUSH" "Pushing branch $BRANCH_NAME"
-  retry_with_backoff git push -u origin "$BRANCH_NAME" >/dev/null || return 1
-
-  if ! wait_for_remote_branch "$BRANCH_NAME"; then
-    log "PUSH" "Error: Branch '$BRANCH_NAME' was pushed but is not visible on origin."
+  resolve_repo_and_push_target
+  if [ -z "$REPO" ]; then
+    log "PUSH" "Error: Could not detect target GitHub repository for PR creation."
     return 1
   fi
 
-  if ! branch_has_commits_ahead "$MAIN_BRANCH" "$BRANCH_NAME"; then
-    log "PR" "Error: No commits ahead of origin/$MAIN_BRANCH on origin/$BRANCH_NAME."
+  log "PUSH" "Using push target '$PUSH_TARGET' and PR repo '$REPO'"
+  retry_with_backoff git push -u "$PUSH_TARGET" "$BRANCH_NAME" >/dev/null || return 1
+
+  local base_ref head_ref
+  if [ "$PUSH_TARGET" = "origin" ]; then
+    if ! wait_for_remote_branch "$BRANCH_NAME"; then
+      log "PUSH" "Error: Branch '$BRANCH_NAME' was pushed but is not visible on origin."
+      return 1
+    fi
+
+    retry_with_backoff git fetch origin "$MAIN_BRANCH" "$BRANCH_NAME" >/dev/null || return 1
+    base_ref="origin/$MAIN_BRANCH"
+    head_ref="origin/$BRANCH_NAME"
+  else
+    base_ref="$MAIN_BRANCH"
+    head_ref="HEAD"
+  fi
+
+  if ! branch_has_commits_ahead "$base_ref" "$head_ref"; then
+    log "PR" "Error: No commits ahead of $base_ref on $head_ref."
     return 1
   fi
 
@@ -1009,7 +1093,9 @@ BODY: <body>"
   fi
 
   local pr_head_ref="$BRANCH_NAME"
-  if [ -n "$ORIGIN_OWNER" ]; then
+  if [ -n "$PUSH_BRANCH_OWNER" ]; then
+    pr_head_ref="$PUSH_BRANCH_OWNER:$BRANCH_NAME"
+  elif [ -n "$ORIGIN_OWNER" ]; then
     pr_head_ref="$ORIGIN_OWNER:$BRANCH_NAME"
   fi
 
