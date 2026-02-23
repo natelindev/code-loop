@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '@shared/types';
-import type { AppConfig, RunOptions, RunState, LogEntry, RepoMeta, LaunchRequirements } from '@shared/types';
+import type {
+  AppConfig,
+  RunOptions,
+  RunState,
+  LogEntry,
+  RepoMeta,
+  LaunchRequirements,
+  RunPrActionResult,
+} from '@shared/types';
 
 const api = {
   // Config
@@ -13,6 +21,10 @@ const api = {
   stopRun: (runId: string): Promise<boolean> => ipcRenderer.invoke(IPC.RUN_STOP, runId),
   listRuns: (): Promise<RunState[]> => ipcRenderer.invoke(IPC.RUN_LIST),
   getRun: (runId: string): Promise<RunState | null> => ipcRenderer.invoke(IPC.RUN_GET, runId),
+  refreshRunPrStatus: (runId: string): Promise<RunPrActionResult> => ipcRenderer.invoke(IPC.RUN_PR_REFRESH, runId),
+  mergeRunPr: (runId: string): Promise<RunPrActionResult> => ipcRenderer.invoke(IPC.RUN_PR_MERGE, runId),
+  resolveAndMergeRunPr: (runId: string): Promise<RunPrActionResult> =>
+    ipcRenderer.invoke(IPC.RUN_PR_RESOLVE_MERGE, runId),
 
   // Run events (streaming)
   onRunLog: (callback: (data: { runId: string; entry: LogEntry }) => void) => {
@@ -30,10 +42,10 @@ const api = {
     ipcRenderer.on(IPC.RUN_PHASE, handler);
     return () => ipcRenderer.removeListener(IPC.RUN_PHASE, handler);
   },
-  onRunDone: (callback: (data: { runId: string; prUrl: string | null; status: string }) => void) => {
+  onRunDone: (callback: (data: { runId: string; prUrl: string | null; status: string; finishedAt?: number }) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      data: { runId: string; prUrl: string | null; status: string }
+      data: { runId: string; prUrl: string | null; status: string; finishedAt?: number }
     ) => callback(data);
     ipcRenderer.on(IPC.RUN_DONE, handler);
     return () => ipcRenderer.removeListener(IPC.RUN_DONE, handler);

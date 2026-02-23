@@ -1,9 +1,10 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execFile } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Anser from 'anser';
+import { promisify } from 'util';
 import { sendToRenderer, showNotification } from './index';
 import { loadConfig, addRecentRepo, resolveScriptPath } from './config-manager';
 import { shell } from 'electron';
@@ -13,8 +14,12 @@ import type {
   LogEntry,
   PhaseStatus,
   PipelinePhase,
+  PrStatusPayload,
+  RunPrActionResult,
 } from '../shared/types';
 import { PIPELINE_PHASES, IPC } from '../shared/types';
+
+const execFileAsync = promisify(execFile);
 
 type ActiveRun = {
   state: RunState;
@@ -114,8 +119,12 @@ function finalizeBackgroundRun(runId: string, state: RunState) {
   }
 
   sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
-  sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status });
+  sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
   persistRunState(state);
+
+  if (state.status === 'completed' && state.prUrl) {
+    void maybeAutoMergeRun(runId, state);
+  }
 }
 
 function stopPolling(runId: string) {
@@ -194,6 +203,13 @@ function loadPersistedRuns() {
       loadedRun.planText = loadedRun.planText ?? null;
       loadedRun.logFilePath = loadedRun.logFilePath ?? null;
       loadedRun.logFileOffset = loadedRun.logFileOffset ?? 0;
+      loadedRun.autoMerge = loadedRun.autoMerge ?? false;
+      loadedRun.prTitle = loadedRun.prTitle ?? null;
+      loadedRun.prNumber = loadedRun.prNumber ?? null;
+      loadedRun.prHeadRef = loadedRun.prHeadRef ?? null;
+      loadedRun.prBaseRef = loadedRun.prBaseRef ?? null;
+      loadedRun.prMergeStatus = loadedRun.prMergeStatus ?? (loadedRun.prUrl ? 'checking' : 'none');
+      loadedRun.prMergeMessage = loadedRun.prMergeMessage ?? null;
 
       if (loadedRun.status === 'running') {
         if (loadedRun.runMode === 'background' && isProcessAlive(loadedRun.pid)) {
@@ -245,6 +261,39 @@ function createInitialPhases(skipPlan: boolean): Record<string, PhaseStatus> {
 
 const LOG_LINE_REGEX = /^\[(.+?)\] \[(.+?)\] (.*)$/;
 const PR_URL_REGEX = /PR created:\s*(https:\/\/\S+)/;
+
+type GhPrView = {
+  url: string;
+  title: string;
+  number: number;
+  state: string;
+  mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | string;
+  headRefName: string;
+  baseRefName: string;
+};
+
+function toPrPayload(runId: string, state: RunState): PrStatusPayload {
+  return {
+    runId,
+    prUrl: state.prUrl,
+    prTitle: state.prTitle,
+    prNumber: state.prNumber,
+    prHeadRef: state.prHeadRef,
+    prBaseRef: state.prBaseRef,
+    prMergeStatus: state.prMergeStatus,
+    prMergeMessage: state.prMergeMessage,
+  };
+}
+
+function parseRepoFromPrUrl(prUrl: string): string | null {
+  const match = prUrl.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/i);
+  if (!match) return null;
+  return match[1];
+}
+
+function updatePrState(state: RunState, partial: Partial<RunState>) {
+  Object.assign(state, partial);
+}
 
 function parseLine(raw: string): LogEntry | null {
   // Strip ANSI codes
@@ -330,6 +379,8 @@ function handleLogEntry(runId: string, entry: LogEntry, state: RunState) {
     const prMatch = entry.message.match(PR_URL_REGEX);
     if (prMatch) {
       state.prUrl = prMatch[1];
+      state.prMergeStatus = 'checking';
+      state.prMergeMessage = 'Pull request created. Checking merge status...';
     }
   } else if (phase === 'FIX') {
     if (entry.message.includes('Skipped')) {
@@ -354,6 +405,316 @@ function handleLogEntry(runId: string, entry: LogEntry, state: RunState) {
     phases: { ...state.phases },
   });
   persistRunState(state);
+}
+
+async function fetchPrView(state: RunState): Promise<GhPrView> {
+  if (!state.prUrl) {
+    throw new Error('No pull request URL available for this run.');
+  }
+
+  const { stdout } = await execFileAsync(
+    'gh',
+    [
+      'pr',
+      'view',
+      state.prUrl,
+      '--json',
+      'url,title,number,state,mergeable,headRefName,baseRefName',
+    ],
+    { cwd: state.repoPath, timeout: 30000 }
+  );
+
+  return JSON.parse(stdout) as GhPrView;
+}
+
+function applyPrView(state: RunState, view: GhPrView) {
+  const mergeStatus =
+    view.state === 'MERGED'
+      ? 'merged'
+      : view.mergeable === 'CONFLICTING'
+        ? 'conflict'
+        : view.mergeable === 'MERGEABLE'
+          ? 'ready'
+          : 'checking';
+
+  const mergeMessage =
+    view.state === 'MERGED'
+      ? 'Pull request has been merged.'
+      : view.mergeable === 'CONFLICTING'
+        ? 'Pull request has merge conflicts.'
+        : view.mergeable === 'MERGEABLE'
+          ? 'Pull request is mergeable.'
+          : 'Mergeability is still being calculated by GitHub.';
+
+  updatePrState(state, {
+    prUrl: view.url || state.prUrl,
+    prTitle: view.title || state.prTitle,
+    prNumber: Number.isFinite(view.number) ? view.number : state.prNumber,
+    prHeadRef: view.headRefName || state.prHeadRef,
+    prBaseRef: view.baseRefName || state.prBaseRef,
+    prMergeStatus: mergeStatus,
+    prMergeMessage: mergeMessage,
+  });
+}
+
+function getRunById(runId: string): RunState | null {
+  const active = activeRuns.get(runId)?.state;
+  if (active) return active;
+  return persistedRuns.get(runId) ?? null;
+}
+
+export async function refreshRunPrStatus(runId: string): Promise<RunPrActionResult> {
+  const state = getRunById(runId);
+  if (!state) return { ok: false, error: 'Run not found.' };
+  if (!state.prUrl) return { ok: false, error: 'No pull request exists for this run yet.' };
+
+  updatePrState(state, {
+    prMergeStatus: 'checking',
+    prMergeMessage: 'Checking pull request status...',
+  });
+  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+  persistRunState(state);
+
+  try {
+    const view = await fetchPrView(state);
+    applyPrView(state, view);
+    sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    persistRunState(state);
+    return { ok: true, payload: toPrPayload(runId, state) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    updatePrState(state, {
+      prMergeStatus: 'failed',
+      prMergeMessage: `Failed to refresh PR status: ${message}`,
+    });
+    sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    persistRunState(state);
+    return { ok: false, error: message, payload: toPrPayload(runId, state) };
+  }
+}
+
+async function executeMerge(state: RunState, runId: string): Promise<RunPrActionResult> {
+  if (!state.prUrl) return { ok: false, error: 'No pull request exists for this run yet.' };
+
+  updatePrState(state, {
+    prMergeStatus: 'auto-merging',
+    prMergeMessage: 'Submitting merge request...',
+  });
+  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+  persistRunState(state);
+
+  try {
+    await execFileAsync(
+      'gh',
+      ['pr', 'merge', state.prUrl, '--auto', '--merge', '--delete-branch'],
+      { cwd: state.repoPath, timeout: 60000 }
+    );
+
+    const refreshed = await refreshRunPrStatus(runId);
+    if (!refreshed.ok) {
+      updatePrState(state, {
+        prMergeStatus: 'auto-merging',
+        prMergeMessage: 'Auto-merge enabled. Waiting for checks and merge.',
+      });
+      sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+      persistRunState(state);
+      return { ok: true, payload: toPrPayload(runId, state) };
+    }
+
+    if (state.prMergeStatus !== 'merged') {
+      updatePrState(state, {
+        prMergeStatus: 'auto-merging',
+        prMergeMessage: 'Auto-merge enabled. Waiting for checks and merge.',
+      });
+      sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+      persistRunState(state);
+    }
+
+    return { ok: true, payload: toPrPayload(runId, state) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    updatePrState(state, {
+      prMergeStatus: 'failed',
+      prMergeMessage: `Failed to merge PR: ${message}`,
+    });
+    sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    persistRunState(state);
+    return { ok: false, error: message, payload: toPrPayload(runId, state) };
+  }
+}
+
+export async function mergeRunPr(runId: string): Promise<RunPrActionResult> {
+  const state = getRunById(runId);
+  if (!state) return { ok: false, error: 'Run not found.' };
+  if (!state.prUrl) return { ok: false, error: 'No pull request exists for this run yet.' };
+
+  await refreshRunPrStatus(runId);
+  if (state.prMergeStatus === 'conflict') {
+    return {
+      ok: false,
+      error: 'Pull request has merge conflicts. Use Resolve & Merge.',
+      payload: toPrPayload(runId, state),
+    };
+  }
+
+  return executeMerge(state, runId);
+}
+
+async function resolvePrConflictsInTempClone(state: RunState): Promise<void> {
+  if (!state.prUrl) throw new Error('No pull request URL available.');
+  if (!state.prHeadRef || !state.prBaseRef) {
+    throw new Error('PR branch metadata is unavailable. Refresh PR status first.');
+  }
+
+  const config = loadConfig();
+  const conflictModel = config.models.modelFix || config.models.modelReview;
+
+  const repo = parseRepoFromPrUrl(state.prUrl);
+  if (!repo) throw new Error('Could not determine repository from PR URL.');
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-loop-merge-'));
+  const cloneDir = path.join(tempRoot, 'repo');
+
+  try {
+    await execFileAsync('gh', ['repo', 'clone', repo, cloneDir], {
+      cwd: state.repoPath,
+      timeout: 120000,
+    });
+    await execFileAsync('git', ['-C', cloneDir, 'config', 'user.name', 'CodeLoop'], { timeout: 15000 });
+    await execFileAsync('git', ['-C', cloneDir, 'config', 'user.email', 'codeloop@local'], { timeout: 15000 });
+    await execFileAsync('git', ['-C', cloneDir, 'fetch', 'origin', state.prBaseRef, state.prHeadRef], { timeout: 30000 });
+    await execFileAsync('git', ['-C', cloneDir, 'checkout', state.prHeadRef], { timeout: 30000 });
+
+    try {
+      await execFileAsync('git', ['-C', cloneDir, 'merge', '--no-edit', `origin/${state.prBaseRef}`], {
+        timeout: 60000,
+      });
+    } catch {
+      // Expected when merge conflicts are present; conflicts are resolved in the next step.
+    }
+
+    const { stdout: conflictStdout } = await execFileAsync(
+      'git',
+      ['-C', cloneDir, 'diff', '--name-only', '--diff-filter=U'],
+      { timeout: 15000 }
+    );
+    const conflictedFiles = conflictStdout
+      .split('\n')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (conflictedFiles.length > 0) {
+      const resolvePrompt = [
+        'Resolve all current git merge conflicts in this repository.',
+        'Requirements:',
+        '- Preserve the intent of the PR branch while safely incorporating upstream changes.',
+        '- Remove all conflict markers.',
+        '- Keep code compiling and coherent.',
+        '',
+        'Conflicted files:',
+        ...conflictedFiles.map((file) => `- ${file}`),
+      ].join('\n');
+
+      await execFileAsync('opencode', ['run', '-m', conflictModel, '--', resolvePrompt], {
+        cwd: cloneDir,
+        timeout: 240000,
+      });
+    }
+
+    const { stdout: remainingConflictsStdout } = await execFileAsync(
+      'git',
+      ['-C', cloneDir, 'diff', '--name-only', '--diff-filter=U'],
+      { timeout: 15000 }
+    );
+    const remainingConflicts = remainingConflictsStdout
+      .split('\n')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (remainingConflicts.length > 0) {
+      throw new Error(`Conflicts remain unresolved: ${remainingConflicts.join(', ')}`);
+    }
+
+    await execFileAsync('git', ['-C', cloneDir, 'add', '-A'], { timeout: 15000 });
+
+    const conflictCommitMessage = state.prNumber
+      ? `fix: resolve merge conflicts for #${state.prNumber}`
+      : 'fix: resolve merge conflicts';
+
+    try {
+      await execFileAsync(
+        'git',
+        ['-C', cloneDir, 'commit', '-m', conflictCommitMessage],
+        { timeout: 30000 }
+      );
+    } catch {
+      // If merge resolved without requiring a new commit, continue.
+    }
+
+    await execFileAsync('git', ['-C', cloneDir, 'push', 'origin', `HEAD:${state.prHeadRef}`], { timeout: 60000 });
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+export async function resolveAndMergeRunPr(runId: string): Promise<RunPrActionResult> {
+  const state = getRunById(runId);
+  if (!state) return { ok: false, error: 'Run not found.' };
+  if (!state.prUrl) return { ok: false, error: 'No pull request exists for this run yet.' };
+
+  const refreshed = await refreshRunPrStatus(runId);
+  if (!refreshed.ok && state.prMergeStatus === 'failed') {
+    return refreshed;
+  }
+
+  if (state.prMergeStatus !== 'conflict') {
+    return executeMerge(state, runId);
+  }
+
+  updatePrState(state, {
+    prMergeStatus: 'checking',
+    prMergeMessage: 'Resolving conflicts with AI and preparing merge...',
+  });
+  sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+  persistRunState(state);
+
+  try {
+    await resolvePrConflictsInTempClone(state);
+    await refreshRunPrStatus(runId);
+    if (state.prMergeStatus === 'conflict') {
+      throw new Error('Conflicts remain after auto-resolution attempt.');
+    }
+    return executeMerge(state, runId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    updatePrState(state, {
+      prMergeStatus: 'failed',
+      prMergeMessage: `Resolve & merge failed: ${message}`,
+    });
+    sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    persistRunState(state);
+    return { ok: false, error: message, payload: toPrPayload(runId, state) };
+  }
+}
+
+async function maybeAutoMergeRun(runId: string, state: RunState) {
+  if (!state.autoMerge || !state.prUrl || state.status !== 'completed') return;
+
+  const refreshed = await refreshRunPrStatus(runId);
+  if (!refreshed.ok && state.prMergeStatus === 'failed') return;
+
+  if (state.prMergeStatus === 'conflict') {
+    updatePrState(state, {
+      prMergeMessage: 'Auto-merge skipped because this PR has merge conflicts. Use Resolve & Merge.',
+    });
+    sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    persistRunState(state);
+    return;
+  }
+
+  if (state.prMergeStatus === 'ready' || state.prMergeStatus === 'checking') {
+    await executeMerge(state, runId);
+  }
 }
 
 export function startRun(options: RunOptions): string {
@@ -418,6 +779,12 @@ export function startRun(options: RunOptions): string {
     phases: createInitialPhases(options.skipPlan),
     logs: [],
     prUrl: null,
+    prTitle: null,
+    prNumber: null,
+    prHeadRef: null,
+    prBaseRef: null,
+    prMergeStatus: 'none',
+    prMergeMessage: null,
     startedAt: Date.now(),
     finishedAt: null,
     pid: null,
@@ -428,6 +795,7 @@ export function startRun(options: RunOptions): string {
     runMode,
     logFilePath: null,
     logFileOffset: 0,
+    autoMerge: !!options.autoMerge,
   };
 
   const child = spawn('bash', [scriptPath, ...args], {
@@ -503,11 +871,20 @@ export function startRun(options: RunOptions): string {
     }
 
     if (state.runMode === 'background') {
+      if (code === 0 && state.status === 'running' && !state.logFilePath) {
+        state.status = 'failed';
+        state.finishedAt = Date.now();
+        state.prMergeStatus = state.prUrl ? 'checking' : 'none';
+        state.prMergeMessage = 'Background run exited before streaming started.';
+        sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+        sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
+        persistRunState(state);
+      }
       if (code !== 0 && state.status === 'running') {
         state.status = 'failed';
         state.finishedAt = Date.now();
         sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
-        sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status });
+        sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
         persistRunState(state);
       }
       return;
@@ -539,8 +916,12 @@ export function startRun(options: RunOptions): string {
     }
 
     sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
-    sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status });
+    sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
     persistRunState(state);
+
+    if (state.status === 'completed' && state.prUrl) {
+      void maybeAutoMergeRun(runId, state);
+    }
   });
 
   child.on('error', (err) => {
@@ -548,6 +929,7 @@ export function startRun(options: RunOptions): string {
     state.finishedAt = Date.now();
     sendToRenderer(IPC.RUN_ERROR, { runId, error: err.message });
     sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
+    sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
     persistRunState(state);
   });
 
@@ -565,6 +947,7 @@ export function stopRun(runId: string): boolean {
   targetState.status = 'stopped';
   targetState.finishedAt = Date.now();
   sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...targetState } });
+  sendToRenderer(IPC.RUN_DONE, { runId, prUrl: targetState.prUrl, status: targetState.status, finishedAt: targetState.finishedAt });
   persistRunState(targetState);
 
   stopPolling(runId);

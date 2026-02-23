@@ -33,6 +33,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
   const [prompt, setPrompt] = useState(initialOptions?.prompt ?? '');
   const [skipPlan, setSkipPlan] = useState(initialOptions?.skipPlan ?? false);
   const [background, setBackground] = useState(initialOptions?.background ?? false);
+  const [autoMerge, setAutoMerge] = useState(initialOptions?.autoMerge ?? false);
   const [planText, setPlanText] = useState(initialOptions?.planText ?? '');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [modelOverrides, setModelOverrides] = useState<Partial<ModelConfig>>({
@@ -52,6 +53,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
     setPrompt(initialOptions?.prompt ?? '');
     setSkipPlan(initialOptions?.skipPlan ?? false);
     setBackground(initialOptions?.background ?? false);
+    setAutoMerge(initialOptions?.autoMerge ?? false);
     setPlanText(initialOptions?.planText ?? '');
     setModelOverrides({
       ...config.lastModelOverrides,
@@ -99,6 +101,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
       prompt: prompt.trim(),
       skipPlan,
       background,
+      autoMerge,
       planText: skipPlan ? planText.trim() : undefined,
       modelOverrides: Object.keys(modelOverrides).length > 0 ? modelOverrides : undefined,
     };
@@ -143,6 +146,14 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
               <p className="text-xs text-muted-foreground">Keeps running even after app quit; logs still stream while app is open</p>
             </div>
             <Switch checked={background} onCheckedChange={setBackground} />
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Auto Merge PR</Label>
+              <p className="text-xs text-muted-foreground">After PR creation, automatically merge when mergeable (default off)</p>
+            </div>
+            <Switch checked={autoMerge} onCheckedChange={setAutoMerge} />
           </div>
 
           {/* Plan text area */}

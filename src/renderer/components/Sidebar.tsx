@@ -5,6 +5,7 @@ import { Separator } from '@shared/components/ui/separator';
 import { Badge } from '@shared/components/ui/badge';
 import { Settings, Play, Plus, RefreshCw, CheckCircle2, XCircle, StopCircle } from 'lucide-react';
 import { cn } from '@shared/lib/utils';
+import { getSubAgentActivity } from '../lib/sub-agent';
 
 interface SidebarProps {
   runs: RunState[];
@@ -181,6 +182,8 @@ function RunItem({
   selected: boolean;
   onClick: () => void;
 }) {
+  const subAgentActivity = getSubAgentActivity(run.logs);
+
   return (
     <button
       onClick={onClick}
@@ -207,9 +210,19 @@ function RunItem({
         {run.prompt}
       </p>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-          {run.currentPhase || 'INIT'}
-        </span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+            {run.currentPhase || 'INIT'}
+          </span>
+          {run.status === 'running' && subAgentActivity.active && (
+            <span
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 truncate"
+              title={subAgentActivity.task ?? undefined}
+            >
+              Agent
+            </span>
+          )}
+        </div>
         <span className="text-xs text-muted-foreground/70 font-medium">
           {formatElapsed(run.startedAt, run.finishedAt)}
         </span>

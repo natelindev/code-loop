@@ -51,11 +51,16 @@ export function useRuns() {
       });
     });
 
-    const unsubDone = api().onRunDone(({ runId, prUrl, status }) => {
+    const unsubDone = api().onRunDone(({ runId, prUrl, status, finishedAt }) => {
       setRuns((prev) =>
         prev.map((r) =>
           r.id === runId
-            ? { ...r, prUrl, status: status as RunState['status'], finishedAt: Date.now() }
+            ? {
+                ...r,
+                prUrl,
+                status: status === 'running' ? r.status : (status as RunState['status']),
+                finishedAt: status === 'running' ? r.finishedAt : (finishedAt ?? Date.now()),
+              }
             : r
         )
       );

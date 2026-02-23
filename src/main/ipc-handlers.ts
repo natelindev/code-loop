@@ -1,6 +1,14 @@
 import { ipcMain, dialog, shell } from 'electron';
 import { loadConfig, saveConfig } from './config-manager';
-import { startRun, stopRun, getRunState, listRuns } from './script-runner';
+import {
+  startRun,
+  stopRun,
+  getRunState,
+  listRuns,
+  refreshRunPrStatus,
+  mergeRunPr,
+  resolveAndMergeRunPr,
+} from './script-runner';
 import { validateRepo, getRepoMeta, listSupportedModels } from './repo-scanner';
 import { getMainWindow } from './index';
 import { checkLaunchRequirements } from './launch-requirements';
@@ -39,6 +47,18 @@ export function registerIpcHandlers() {
 
   ipcMain.handle(IPC.RUN_GET, (_event, runId: string) => {
     return getRunState(runId);
+  });
+
+  ipcMain.handle(IPC.RUN_PR_REFRESH, (_event, runId: string) => {
+    return refreshRunPrStatus(runId);
+  });
+
+  ipcMain.handle(IPC.RUN_PR_MERGE, (_event, runId: string) => {
+    return mergeRunPr(runId);
+  });
+
+  ipcMain.handle(IPC.RUN_PR_RESOLVE_MERGE, (_event, runId: string) => {
+    return resolveAndMergeRunPr(runId);
   });
 
   // Repo

@@ -15,6 +15,14 @@ export type PipelinePhase = (typeof PIPELINE_PHASES)[number];
 export type PhaseStatus = 'pending' | 'active' | 'completed' | 'skipped' | 'failed';
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'stopped';
+export type PrMergeStatus =
+  | 'none'
+  | 'checking'
+  | 'ready'
+  | 'conflict'
+  | 'auto-merging'
+  | 'merged'
+  | 'failed';
 
 export interface LogEntry {
   timestamp: string;
@@ -34,6 +42,12 @@ export interface RunState {
   phases: Record<string, PhaseStatus>;
   logs: LogEntry[];
   prUrl: string | null;
+  prTitle: string | null;
+  prNumber: number | null;
+  prHeadRef: string | null;
+  prBaseRef: string | null;
+  prMergeStatus: PrMergeStatus;
+  prMergeMessage: string | null;
   startedAt: number;
   finishedAt: number | null;
   pid: number | null;
@@ -44,6 +58,7 @@ export interface RunState {
   runMode: 'foreground' | 'background';
   logFilePath: string | null;
   logFileOffset: number;
+  autoMerge: boolean;
 }
 
 export interface RunOptions {
@@ -53,6 +68,24 @@ export interface RunOptions {
   background?: boolean;
   planText?: string;
   modelOverrides?: Partial<ModelConfig>;
+  autoMerge?: boolean;
+}
+
+export interface PrStatusPayload {
+  runId: string;
+  prUrl: string | null;
+  prTitle: string | null;
+  prNumber: number | null;
+  prHeadRef: string | null;
+  prBaseRef: string | null;
+  prMergeStatus: PrMergeStatus;
+  prMergeMessage: string | null;
+}
+
+export interface RunPrActionResult {
+  ok: boolean;
+  error?: string;
+  payload?: PrStatusPayload;
 }
 
 export interface ModelConfig {
@@ -114,6 +147,9 @@ export const IPC = {
   RUN_DONE: 'run:done',
   RUN_ERROR: 'run:error',
   RUN_STATUS: 'run:status',
+  RUN_PR_REFRESH: 'run:pr:refresh',
+  RUN_PR_MERGE: 'run:pr:merge',
+  RUN_PR_RESOLVE_MERGE: 'run:pr:resolve-merge',
   REPO_VALIDATE: 'repo:validate',
   REPO_META: 'repo:meta',
   REPO_PICK_FOLDER: 'repo:pick-folder',
