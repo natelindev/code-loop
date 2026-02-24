@@ -43,6 +43,19 @@ Before running CodeLoop, ensure you have the following installed:
     pnpm dev
     ```
 
+### Production Build
+
+- Build distributable desktop artifacts (DMG/ZIP on macOS):
+    ```bash
+    pnpm build
+    ```
+- Build an unpacked app directory only (faster local validation):
+    ```bash
+    pnpm build:dir
+    ```
+
+Build output is written to the `release/` directory.
+
 ### Configuration
 
 On the first launch, CodeLoop will create a default configuration in `~/.code-loop.json`. You can manage these settings directly within the app's **Settings** panel:

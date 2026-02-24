@@ -9,9 +9,41 @@
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "build": "tsc && vite build",
+    "build:app": "tsc && vite build",
+    "build": "pnpm build:app && electron-builder",
+    "build:dir": "pnpm build:app && electron-builder --dir",
     "preview": "vite preview",
     "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.natelindev.code-loop",
+    "productName": "CodeLoop",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "opencode-loop.sh",
+        "to": "opencode-loop.sh"
+      },
+      {
+        "from": "logo.png",
+        "to": "logo.png"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
+    }
   },
   "dependencies": {
     "anser": "^2.3.5",
