@@ -16,7 +16,7 @@ type View = 'runs' | 'config';
 
 export default function App() {
   const { runs, selectedRun, selectedRunId, setSelectedRunId, startRun, stopRun } = useRuns();
-  const { config, loading: configLoading, save: saveConfig } = useConfig();
+  const { config, loading: configLoading, save: saveConfig, reload: reloadConfig } = useConfig();
   const [view, setView] = useState<View>('runs');
   const [showNewRun, setShowNewRun] = useState(false);
   const [newRunPreset, setNewRunPreset] = useState<Partial<RunOptions> | null>(null);
@@ -148,8 +148,9 @@ export default function App() {
           onStart={async (options) => {
             const result = await startRun(options);
             if (result.ok) {
+              const latestConfig = await reloadConfig();
               await saveConfig({
-                ...config,
+                ...latestConfig,
                 lastModelOverrides: options.modelOverrides ?? {},
               });
               setNewRunPreset(null);

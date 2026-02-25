@@ -5,35 +5,29 @@ export interface SubAgentActivity {
   task: string | null;
 }
 
-function cleanTaskLabel(message: string): string {
+function normalizeTaskLabel(message: string): string {
   return message
-    .replace(/^•\s*/, '')
-    .replace(/\s*Explore Agent\s*$/i, '')
+    .trim()
+    .replace(/^[•✓]\s*/, '')
     .trim();
-}
-
-function isBulletTask(message: string): boolean {
-  return message.trimStart().startsWith('•');
-}
-
-function isExploreAgentTask(message: string): boolean {
-  return /\bExplore Agent\b/i.test(message);
 }
 
 export function getSubAgentActivity(logs: LogEntry[]): SubAgentActivity {
   for (let i = logs.length - 1; i >= 0; i -= 1) {
-    const message = logs[i]?.message ?? '';
-    if (!isBulletTask(message)) continue;
+    const message = (logs[i]?.message ?? '').trim();
+    if (!/\bExplore Agent\b/i.test(message)) continue;
 
-    if (isExploreAgentTask(message)) {
-      const task = cleanTaskLabel(message);
+    if (message.startsWith('✓')) {
+      return { active: false, task: null };
+    }
+
+    if (message.startsWith('•')) {
+      const task = normalizeTaskLabel(message);
       return {
         active: true,
         task: task || null,
       };
     }
-
-    return { active: false, task: null };
   }
 
   return { active: false, task: null };

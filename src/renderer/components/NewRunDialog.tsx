@@ -86,12 +86,12 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
       setError('Please select a repository');
       return;
     }
-    if (!prompt.trim()) {
-      setError('Please enter a prompt');
-      return;
-    }
     if (skipPlan && !planText.trim()) {
       setError('Please provide a plan when skipping the plan phase');
+      return;
+    }
+    if (!skipPlan && !prompt.trim()) {
+      setError('Please enter a prompt');
       return;
     }
 
@@ -184,12 +184,14 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
           {/* Prompt */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              {skipPlan ? 'Task Description' : 'Prompt'}
+              {skipPlan ? 'Task Description (Optional)' : 'Prompt'}
             </Label>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the task you want to accomplish..."
+              placeholder={skipPlan
+                ? 'Optional: add extra context beyond your plan...'
+                : 'Describe the task you want to accomplish...'}
               rows={4}
               className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
             />

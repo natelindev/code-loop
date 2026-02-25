@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Anser from 'anser';
 import type { LogEntry } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
+import { Input } from '@shared/components/ui/input';
 import { ArrowDownToLine, Terminal } from 'lucide-react';
 import { cn } from '@shared/lib/utils';
 
@@ -63,6 +64,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
 export default function LogViewer({ logs }: LogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
@@ -78,14 +80,34 @@ export default function LogViewer({ logs }: LogViewerProps) {
   };
 
   // Only show last 5000 lines for performance
-  const visibleLogs = logs.length > 5000 ? logs.slice(-5000) : logs;
+  const latestLogs = logs.length > 5000 ? logs.slice(-5000) : logs;
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const visibleLogs = normalizedQuery
+    ? latestLogs.filter((log) => {
+        const haystack = `${log.timestamp} ${log.phase} ${log.message} ${log.raw}`.toLowerCase();
+        return haystack.includes(normalizedQuery);
+      })
+    : latestLogs;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-background/50">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/30">
-        <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          <Terminal className="w-4 h-4" />
-          Terminal Output
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+            <Terminal className="w-4 h-4" />
+            Terminal Output
+          </div>
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search logs..."
+            className="h-8 text-xs max-w-xs"
+          />
+          {normalizedQuery && (
+            <span className="text-xs text-muted-foreground/70 whitespace-nowrap">
+              {visibleLogs.length} match{visibleLogs.length === 1 ? '' : 'es'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {logs.length > 5000 && (
@@ -119,7 +141,7 @@ export default function LogViewer({ logs }: LogViewerProps) {
       >
         {visibleLogs.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-muted-foreground/50 font-mono italic">
-            Waiting for logs...
+            {normalizedQuery ? 'No matching logs' : 'Waiting for logs...'}
           </div>
         ) : (
           visibleLogs.map((log, i) => <LogLine key={i} entry={log} />)

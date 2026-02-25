@@ -89,10 +89,33 @@ export default function Sidebar({
         </Button>
       </div>
 
+      <div className="px-3 pb-3">
+        <div className="flex gap-2 bg-muted/50 p-1 rounded-lg">
+          <Button
+            variant={view === 'runs' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => onViewChange('runs')}
+            className={cn("flex-1 text-xs font-medium transition-all", view === 'runs' && "shadow-sm bg-background")}
+          >
+            <Play className="w-3.5 h-3.5 mr-1.5" />
+            Runs
+          </Button>
+          <Button
+            variant={view === 'config' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => onViewChange('config')}
+            className={cn("flex-1 text-xs font-medium transition-all", view === 'config' && "shadow-sm bg-background")}
+          >
+            <Settings className="w-3.5 h-3.5 mr-1.5" />
+            Settings
+          </Button>
+        </div>
+      </div>
+
       <Separator className="opacity-50" />
 
       {/* Runs list */}
-      <ScrollArea className="flex-1 px-3 py-4">
+      <ScrollArea className="flex-1 min-h-0 px-3 py-4">
         {runningRuns.length > 0 && (
           <div className="mb-6 animate-in fade-in slide-in-from-left-2 duration-300">
             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -146,29 +169,6 @@ export default function Sidebar({
         )}
       </ScrollArea>
 
-      {/* Footer nav */}
-      <div className="p-3 bg-background/50 backdrop-blur-md border-t border-border">
-        <div className="flex gap-2 bg-muted/50 p-1 rounded-lg">
-          <Button
-            variant={view === 'runs' ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => onViewChange('runs')}
-            className={cn("flex-1 text-xs font-medium transition-all", view === 'runs' && "shadow-sm bg-background")}
-          >
-            <Play className="w-3.5 h-3.5 mr-1.5" />
-            Runs
-          </Button>
-          <Button
-            variant={view === 'config' ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => onViewChange('config')}
-            className={cn("flex-1 text-xs font-medium transition-all", view === 'config' && "shadow-sm bg-background")}
-          >
-            <Settings className="w-3.5 h-3.5 mr-1.5" />
-            Settings
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

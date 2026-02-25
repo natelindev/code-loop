@@ -198,7 +198,7 @@ export default function RunPanel({ run, config, onStop, onRerun }: RunPanelProps
                 title={subAgentActivity.task ?? undefined}
               >
                 <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-                Sub-agent working
+                {subAgentActivity.task || 'Sub-agent running'}
               </Badge>
             )}
             {run.runMode === 'background' && run.status === 'running' && (
@@ -224,12 +224,6 @@ export default function RunPanel({ run, config, onStop, onRerun }: RunPanelProps
             {run.prompt}
           </p>
         </button>
-
-        {run.status === 'running' && subAgentActivity.active && subAgentActivity.task && (
-          <p className="mt-2 text-xs text-purple-600/80 dark:text-purple-300/80 truncate">
-            Running: {subAgentActivity.task}
-          </p>
-        )}
 
         {/* Action bar */}
         <div className="flex items-center gap-2 mt-4">

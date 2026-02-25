@@ -64,7 +64,7 @@ export interface RunState {
 
 export interface RunOptions {
   repoPath: string;
-  prompt: string;
+  prompt?: string;
   skipPlan: boolean;
   background?: boolean;
   planText?: string;

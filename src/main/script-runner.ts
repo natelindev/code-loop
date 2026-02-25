@@ -723,9 +723,18 @@ async function maybeAutoMergeRun(runId: string, state: RunState) {
 export function startRun(options: RunOptions): string {
   const runId = uuidv4();
   const config = loadConfig();
+  const prompt = options.prompt?.trim() ?? '';
+  const planText = options.planText?.trim() ?? '';
 
-  // Add to recent repos
-  addRecentRepo(config, options.repoPath);
+  if (options.skipPlan && !planText) {
+    throw new Error('Plan text is required when skipping the plan phase');
+  }
+
+  if (!options.skipPlan && !prompt) {
+    throw new Error('Prompt is required');
+  }
+
+  const executionPrompt = prompt || 'Use the provided implementation plan.';
 
   const scriptPath = resolveScriptPath();
   if (!fs.existsSync(scriptPath)) {
@@ -763,8 +772,8 @@ export function startRun(options: RunOptions): string {
     options.repoPath,
   ];
 
-  if (options.skipPlan && options.planText) {
-    env.OPENCODE_LOOP_PLAN_TEXT = options.planText;
+  if (options.skipPlan && planText) {
+    env.OPENCODE_LOOP_PLAN_TEXT = planText;
     args.push('--skip-plan');
   }
 
@@ -773,7 +782,7 @@ export function startRun(options: RunOptions): string {
   }
 
   // Add the prompt
-  args.push(options.prompt);
+  args.push(executionPrompt);
 
   const repoName = options.repoPath.split('/').pop() || 'repo';
 
@@ -781,7 +790,7 @@ export function startRun(options: RunOptions): string {
     id: runId,
     repoPath: options.repoPath,
     repoName,
-    prompt: options.prompt,
+    prompt,
     branchName: '',
     status: 'running',
     currentPhase: 'INIT',
@@ -800,7 +809,7 @@ export function startRun(options: RunOptions): string {
     skipPlan: options.skipPlan,
     background: !!options.background,
     modelOverrides: options.modelOverrides ?? null,
-    planText: options.skipPlan ? options.planText?.trim() || null : null,
+    planText: options.skipPlan ? planText || null : null,
     runMode,
     logFilePath: null,
     logFileOffset: 0,
@@ -817,6 +826,10 @@ export function startRun(options: RunOptions): string {
 
   state.pid = child.pid ?? null;
   activeRuns.set(runId, { state, process: child, logPoller: null, logLineBuffer: '' });
+
+  // Add to recent repos once run has been successfully created.
+  addRecentRepo(config, options.repoPath);
+
   persistRunState(state);
 
   // Send initial state
