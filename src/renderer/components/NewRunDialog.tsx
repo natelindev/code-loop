@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import RepoPicker from './RepoPicker';
 import api from '../lib/ipc';
 import { PREDEFINED_WORKFLOWS } from '@shared/types';
-import type { AppConfig, RunOptions, ModelConfig, RepoMeta } from '@shared/types';
+import type { AppConfig, RunOptions, ModelConfig, RepoMeta, RepoOpenPr, RepoBranchLookup } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { Label } from '@shared/components/ui/label';
 import { Switch } from '@shared/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@shared/components/ui/dialog';
+import { Input } from '@shared/components/ui/input';
 import { ChevronRight, Play, Loader2 } from 'lucide-react';
 import { cn } from '@shared/lib/utils';
 
@@ -31,9 +32,13 @@ const MODEL_FIELDS: { key: keyof ModelConfig; label: string }[] = [
 export default function NewRunDialog({ config, initialOptions, onStart, onClose }: NewRunDialogProps) {
   const [workflowId, setWorkflowId] = useState(initialOptions?.workflowId ?? config.defaultWorkflowId ?? PREDEFINED_WORKFLOWS[0].id);
   const [repoPath, setRepoPath] = useState(initialOptions?.repoPath ?? '');
-  const [targetBranch, setTargetBranch] = useState(initialOptions?.targetBranch ?? '');
-  const [repoBranches, setRepoBranches] = useState<string[]>([]);
-  const [currentRepoBranch, setCurrentRepoBranch] = useState<string | null>(null);
+  const [prTargetMode, setPrTargetMode] = useState<'pr' | 'branch'>(initialOptions?.targetBranch ? 'branch' : 'pr');
+  const [myOpenPrs, setMyOpenPrs] = useState<RepoOpenPr[]>([]);
+  const [loadingMyOpenPrs, setLoadingMyOpenPrs] = useState(false);
+  const [selectedPrNumber, setSelectedPrNumber] = useState<string>('');
+  const [branchInput, setBranchInput] = useState(initialOptions?.targetBranch ?? '');
+  const [branchLookup, setBranchLookup] = useState<RepoBranchLookup | null>(null);
+  const [checkingBranch, setCheckingBranch] = useState(false);
   const [prompt, setPrompt] = useState(initialOptions?.prompt ?? '');
   const [skipPlan, setSkipPlan] = useState(initialOptions?.skipPlan ?? false);
   const [background, setBackground] = useState(initialOptions?.background ?? false);
@@ -63,47 +68,87 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
   useEffect(() => {
     let cancelled = false;
 
-    if (!repoPath.trim()) {
-      setRepoBranches([]);
-      setCurrentRepoBranch(null);
+    if (!supportsTargetBranch || !repoPath.trim()) {
       if (!supportsTargetBranch) {
-        setTargetBranch('');
+        setPrTargetMode(initialOptions?.targetBranch ? 'branch' : 'pr');
       }
+      setMyOpenPrs([]);
+      setSelectedPrNumber('');
       return;
     }
 
+    setLoadingMyOpenPrs(true);
     api()
-      .listRepoBranches(repoPath.trim())
-      .then(({ branches, current }) => {
+      .listMyOpenPrs(repoPath.trim())
+      .then((prs) => {
         if (cancelled) return;
-        setRepoBranches(branches);
-        setCurrentRepoBranch(current);
-        if (!supportsTargetBranch) {
-          setTargetBranch('');
+
+        setMyOpenPrs(prs);
+        setLoadingMyOpenPrs(false);
+
+        if (prTargetMode !== 'pr') return;
+        if (prs.length === 0) {
+          setSelectedPrNumber('');
           return;
         }
 
-        const preferred = targetBranch || initialOptions?.targetBranch || current || branches[0] || '';
-        if (preferred) {
-          setTargetBranch(preferred);
+        const preferredByBranch = branchInput ? prs.find((pr) => pr.headRefName === branchInput) : undefined;
+        const preferredByInitial = initialOptions?.targetBranch
+          ? prs.find((pr) => pr.headRefName === initialOptions.targetBranch)
+          : undefined;
+        const preferred = preferredByBranch ?? preferredByInitial ?? prs[0];
+
+        if (!selectedPrNumber || !prs.some((pr) => String(pr.number) === selectedPrNumber)) {
+          setSelectedPrNumber(String(preferred.number));
         }
       })
       .catch(() => {
         if (cancelled) return;
-        setRepoBranches([]);
-        setCurrentRepoBranch(null);
+        setMyOpenPrs([]);
+        setSelectedPrNumber('');
+        setLoadingMyOpenPrs(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [repoPath, supportsTargetBranch]);
+  }, [repoPath, supportsTargetBranch, prTargetMode, selectedPrNumber, branchInput, initialOptions?.targetBranch]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!supportsTargetBranch || prTargetMode !== 'branch' || !repoPath.trim() || !branchInput.trim()) {
+      setBranchLookup(null);
+      setCheckingBranch(false);
+      return;
+    }
+
+    setCheckingBranch(true);
+    api()
+      .lookupRepoBranch(repoPath.trim(), branchInput.trim())
+      .then((result) => {
+        if (cancelled) return;
+        setBranchLookup(result);
+        setCheckingBranch(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBranchLookup(null);
+        setCheckingBranch(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repoPath, supportsTargetBranch, prTargetMode, branchInput]);
 
   const handleRepoChange = (path: string, _meta: RepoMeta | null) => {
     setRepoPath(path);
     setError(null);
     if (!path.trim()) {
-      setTargetBranch('');
+      setSelectedPrNumber('');
+      setBranchInput('');
+      setBranchLookup(null);
     }
   };
 
@@ -132,9 +177,29 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
       setError('Please enter a prompt');
       return;
     }
-    if (supportsTargetBranch && !targetBranch.trim()) {
-      setError('Please select a target branch for PR Autofix');
-      return;
+
+    let resolvedTargetBranch = '';
+    if (supportsTargetBranch) {
+      if (prTargetMode === 'pr') {
+        const selectedPr = myOpenPrs.find((pr) => String(pr.number) === selectedPrNumber);
+        resolvedTargetBranch = selectedPr?.headRefName ?? '';
+        if (!resolvedTargetBranch) {
+          setError('Please select one of your open PRs for PR Autofix');
+          return;
+        }
+      } else {
+        resolvedTargetBranch = branchInput.trim();
+        if (!resolvedTargetBranch) {
+          setError('Please enter a target branch for PR Autofix');
+          return;
+        }
+        const lookup = await api().lookupRepoBranch(repoPath.trim(), resolvedTargetBranch);
+        setBranchLookup(lookup);
+        if (!lookup.exists) {
+          setError(`Branch '${resolvedTargetBranch}' was not found locally or on origin`);
+          return;
+        }
+      }
     }
 
     setStarting(true);
@@ -143,7 +208,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
     const options: RunOptions = {
       repoPath: repoPath.trim(),
       workflowId,
-      targetBranch: supportsTargetBranch ? targetBranch.trim() : undefined,
+      targetBranch: supportsTargetBranch ? resolvedTargetBranch : undefined,
       prompt: supportsPrompt ? prompt.trim() : undefined,
       skipPlan: supportsPrompt ? skipPlan : false,
       background: supportsBackground ? background : false,
@@ -192,7 +257,10 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
                   setSkipPlan(false);
                 }
                 if (selected?.id !== 'pr-autofix') {
-                  setTargetBranch('');
+                  setSelectedPrNumber('');
+                  setBranchInput('');
+                  setBranchLookup(null);
+                  setPrTargetMode('pr');
                 }
               }}
             >
@@ -210,21 +278,64 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
 
           {supportsTargetBranch && (
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">PR Branch</Label>
-              <Select value={targetBranch} onValueChange={setTargetBranch}>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">PR Target</Label>
+              <Select value={prTargetMode} onValueChange={(value) => setPrTargetMode(value as 'pr' | 'branch')}>
                 <SelectTrigger className="h-9 bg-background">
-                  <SelectValue placeholder="Select branch with open PR" />
+                  <SelectValue placeholder="Select target type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {repoBranches.map((branch) => (
-                    <SelectItem key={branch} value={branch}>
-                      {branch}{currentRepoBranch === branch ? ' (current)' : ''}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="pr">Pick my open PR</SelectItem>
+                  <SelectItem value="branch">Enter branch name</SelectItem>
                 </SelectContent>
               </Select>
+
+              {prTargetMode === 'pr' ? (
+                <>
+                  <Select value={selectedPrNumber} onValueChange={setSelectedPrNumber} disabled={loadingMyOpenPrs || myOpenPrs.length === 0}>
+                    <SelectTrigger className="h-9 bg-background">
+                      <SelectValue placeholder={loadingMyOpenPrs ? 'Loading your open PRs...' : 'Select one of your open PRs'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {myOpenPrs.map((pr) => (
+                        <SelectItem key={pr.number} value={String(pr.number)}>
+                          #{pr.number} · {pr.headRefName} → {pr.baseRefName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {myOpenPrs.length > 0 && selectedPrNumber && (
+                    <p className="text-xs text-muted-foreground truncate">
+                      {myOpenPrs.find((pr) => String(pr.number) === selectedPrNumber)?.title}
+                    </p>
+                  )}
+                  {!loadingMyOpenPrs && myOpenPrs.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No open PRs authored by you were found in this repository.</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Input
+                    value={branchInput}
+                    onChange={(e) => setBranchInput(e.target.value)}
+                    placeholder="feature/my-branch"
+                    className="h-9 bg-background"
+                  />
+                  {!branchInput.trim() && <p className="text-xs text-muted-foreground">Enter a local or remote branch name.</p>}
+                  {!!branchInput.trim() && checkingBranch && <p className="text-xs text-muted-foreground">Checking branch availability...</p>}
+                  {!!branchInput.trim() && !checkingBranch && branchLookup?.exists && branchLookup.local && (
+                    <p className="text-xs text-muted-foreground">Branch found locally.</p>
+                  )}
+                  {!!branchInput.trim() && !checkingBranch && branchLookup?.exists && !branchLookup.local && branchLookup.remote && (
+                    <p className="text-xs text-muted-foreground">Branch found on origin. It will be pulled before PR Autofix starts.</p>
+                  )}
+                  {!!branchInput.trim() && !checkingBranch && branchLookup && !branchLookup.exists && (
+                    <p className="text-xs text-destructive">Branch was not found locally or on origin.</p>
+                  )}
+                </>
+              )}
+
               <p className="text-xs text-muted-foreground">
-                PR Autofix runs against the selected local branch and expects an open PR for that branch.
+                PR Autofix runs on the selected PR branch and expects an open PR for that branch.
               </p>
             </div>
           )}

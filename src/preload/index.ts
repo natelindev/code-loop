@@ -6,6 +6,8 @@ import type {
   RunState,
   LogEntry,
   RepoMeta,
+  RepoOpenPr,
+  RepoBranchLookup,
   LaunchRequirements,
   RunPrActionResult,
 } from '@shared/types';
@@ -66,6 +68,9 @@ const api = {
   getRepoMeta: (path: string): Promise<RepoMeta | null> => ipcRenderer.invoke(IPC.REPO_META, path),
   listRepoBranches: (path: string): Promise<{ branches: string[]; current: string | null }> =>
     ipcRenderer.invoke(IPC.REPO_BRANCHES, path),
+  listMyOpenPrs: (path: string): Promise<RepoOpenPr[]> => ipcRenderer.invoke(IPC.REPO_OPEN_PRS, path),
+  lookupRepoBranch: (path: string, branch: string): Promise<RepoBranchLookup> =>
+    ipcRenderer.invoke(IPC.REPO_BRANCH_LOOKUP, path, branch),
   pickFolder: (): Promise<{ path: string; meta: RepoMeta | null } | { error: string } | null> =>
     ipcRenderer.invoke(IPC.REPO_PICK_FOLDER),
 

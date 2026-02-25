@@ -154,6 +154,22 @@ export interface RepoMeta {
   mainBranch: string;
 }
 
+export interface RepoOpenPr {
+  number: number;
+  title: string;
+  url: string;
+  headRefName: string;
+  baseRefName: string;
+}
+
+export interface RepoBranchLookup {
+  branch: string;
+  exists: boolean;
+  local: boolean;
+  remote: boolean;
+  remoteRef: string | null;
+}
+
 export interface ToolReadiness {
   installed: boolean;
   authenticated: boolean;
@@ -187,6 +203,8 @@ export const IPC = {
   REPO_VALIDATE: 'repo:validate',
   REPO_META: 'repo:meta',
   REPO_BRANCHES: 'repo:branches',
+  REPO_OPEN_PRS: 'repo:open-prs',
+  REPO_BRANCH_LOOKUP: 'repo:branch-lookup',
   REPO_PICK_FOLDER: 'repo:pick-folder',
   SHELL_OPEN_URL: 'shell:open-url',
   SHELL_OPEN_IN_VSCODE: 'shell:open-in-vscode',

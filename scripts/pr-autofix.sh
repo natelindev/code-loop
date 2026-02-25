@@ -96,7 +96,14 @@ BRANCH="$CURRENT_BRANCH"
 if [ -n "$TARGET_BRANCH" ]; then
   BRANCH="$TARGET_BRANCH"
   if ! git show-ref --verify --quiet "refs/heads/$TARGET_BRANCH"; then
-    fail "INIT" "Branch '$TARGET_BRANCH' does not exist locally."
+    if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
+      log "INIT" "Branch '$TARGET_BRANCH' not found locally; fetching from origin"
+      if ! git fetch origin "$TARGET_BRANCH:$TARGET_BRANCH" >/dev/null 2>&1; then
+        fail "INIT" "Failed to pull remote branch '$TARGET_BRANCH' from origin."
+      fi
+    else
+      fail "INIT" "Branch '$TARGET_BRANCH' does not exist locally or on origin."
+    fi
   fi
 
   if [ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]; then
