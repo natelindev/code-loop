@@ -7,20 +7,54 @@ fi
 set -euo pipefail
 
 # git-autofix: Find PR review findings from github-actions bot, fix them with
-#              opencode (Claude Sonnet 4.6), then commit, push, wait for
+#              opencode (fix model), then commit, push, wait for
 #              required PR checks, and auto-merge (unless --skip-merge).
 
-MODEL="github-copilot/claude-sonnet-4.6"
+DEFAULT_MODEL_FIX="github-copilot/claude-sonnet-4.6"
+MODEL_FIX="${OPENCODE_LOOP_MODEL_FIX:-$DEFAULT_MODEL_FIX}"
 SKIP_MERGE=0
+
+log() {
+  local step="$1"
+  shift
+  local ts
+  ts=$(date '+%Y-%m-%d %H:%M:%S')
+  echo "[$ts] [$step] $*"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pr-autofix.sh [--skip-merge]
+
+Options:
+  --skip-merge   Skip waiting for required checks and skip auto-merge
+  -h, --help     Show this help
+
+Environment:
+  OPENCODE_LOOP_MODEL_FIX   Override the fix model (default: github-copilot/claude-sonnet-4.6)
+EOF
+}
+
+fail() {
+  local phase="$1"
+  shift
+  log "$phase" "Error: $*"
+  exit 1
+}
 
 for arg in "$@"; do
   case "$arg" in
     --skip-merge)
       SKIP_MERGE=1
       ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
       echo "Error: Unknown option '$arg'."
-      echo "Usage: $0 [--skip-merge]"
+      usage
       exit 1
       ;;
   esac
@@ -35,22 +69,21 @@ trap cleanup EXIT
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: Not a git repository."; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "INIT" "Not a git repository."
 
 for cmd in gh opencode jq; do
   if ! command -v "$cmd" &> /dev/null; then
-    echo "Error: $cmd is not installed."
-    exit 1
+    fail "INIT" "$cmd is not installed."
   fi
 done
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
-  echo "Error: Current branch is $BRANCH. Switch to a feature branch with an open PR."
-  exit 1
+  fail "INIT" "Current branch is $BRANCH. Switch to a feature branch with an open PR."
 fi
 
-echo "==> Branch: $BRANCH"
+log "INIT" "Branch: $BRANCH"
+started_at=$(date +%s)
 
 # ---------------------------------------------------------------------------
 # 1. Find the open PR for the current branch
@@ -58,40 +91,37 @@ echo "==> Branch: $BRANCH"
 
 PR_JSON=$(gh pr view "$BRANCH" --json number,url,baseRefName 2>/dev/null || true)
 if [ -z "$PR_JSON" ]; then
-  echo "Error: No open PR found for branch '$BRANCH'."
-  exit 1
+  fail "INIT" "No open PR found for branch '$BRANCH'."
 fi
 
 PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
 PR_URL=$(echo "$PR_JSON" | jq -r '.url')
 PR_BASE_REF=$(echo "$PR_JSON" | jq -r '.baseRefName // empty')
-echo "==> Found PR #$PR_NUMBER: $PR_URL"
+log "INIT" "Found PR #$PR_NUMBER: $PR_URL"
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
 if [ -z "$REPO" ]; then
-  echo "Error: Could not detect current GitHub repository."
-  exit 1
+  fail "INIT" "Could not detect current GitHub repository."
 fi
 
 # ---------------------------------------------------------------------------
 # 2. Fetch github-actions bot comment that contains "Findings"
 # ---------------------------------------------------------------------------
 
-echo "==> Fetching PR comments..."
+phase_start=$(date +%s)
+log "REVIEW" "Starting findings retrieval from PR comments"
 RAW_COMMENTS_FILE=$(mktemp)
 COMMENTS_JSON_FILE=$(mktemp)
 
 if ! gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate > "$RAW_COMMENTS_FILE" 2>/dev/null; then
-  echo "Error: Failed to fetch PR comments from GitHub API."
-  exit 1
+  fail "REVIEW" "Failed to fetch PR comments from GitHub API."
 fi
 
 # First try a strict jq parse; if that fails (e.g. raw control chars in comment
 # bodies), fall back to python's tolerant JSON decoder and re-emit valid JSON.
 if ! jq -s 'add' "$RAW_COMMENTS_FILE" > "$COMMENTS_JSON_FILE" 2>/dev/null; then
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "Error: Could not parse PR comments JSON with jq, and python3 is unavailable for fallback parsing."
-    exit 1
+    fail "REVIEW" "Could not parse PR comments JSON with jq, and python3 is unavailable for fallback parsing."
   fi
 
   if ! python3 -c '
@@ -120,8 +150,7 @@ while True:
 with open(sys.argv[2], "w", encoding="utf-8") as out:
     json.dump(merged, out)
 ' "$RAW_COMMENTS_FILE" "$COMMENTS_JSON_FILE" 2>/dev/null; then
-    echo "Error: Failed to parse PR comments from GitHub API output."
-    exit 1
+    fail "REVIEW" "Failed to parse PR comments from GitHub API output."
   fi
 fi
 
@@ -137,16 +166,15 @@ REVIEW_COMMENT=$(echo "$REVIEW_COMMENT_JSON" | jq -r '.body // empty')
 REVIEW_COMMENT_NODE_ID=$(echo "$REVIEW_COMMENT_JSON" | jq -r '.node_id // empty')
 
 if [ -z "$REVIEW_COMMENT" ]; then
-  echo "Error: No github-actions comment with 'Findings' found on PR #$PR_NUMBER."
-  echo ""
-  echo "Available github-actions comments:"
+  log "REVIEW" "No github-actions comment with 'Findings' found on PR #$PR_NUMBER."
+  log "REVIEW" "Available github-actions comments:"
   jq -r '
     .[] | select(.user.login | test("github-actions"))
-    | "  - \(.user.login): \(.body[:100])..."' "$COMMENTS_JSON_FILE" 2>/dev/null || echo "  (none)"
+    | "  - \(.user.login): \(.body[:100])..."' "$COMMENTS_JSON_FILE" 2>/dev/null || log "REVIEW" "  (none)"
   exit 1
 fi
 
-echo "==> Found review comment with findings."
+log "REVIEW" "Found review comment with findings"
 
 REVIEW_FILE=$(mktemp)
 echo "$REVIEW_COMMENT" > "$REVIEW_FILE"
@@ -166,7 +194,7 @@ if ! git diff --name-only "$PR_BASE_REF...HEAD" > "$CHANGED_FILES_FILE" 2>/dev/n
 fi
 
 CHANGED_COUNT=$(wc -l < "$CHANGED_FILES_FILE" | tr -d '[:space:]')
-echo "==> Changed files vs $PR_BASE_REF: $CHANGED_COUNT"
+log "REVIEW" "Changed files vs $PR_BASE_REF: $CHANGED_COUNT"
 
 FILTERED_REVIEW_FILE=$(mktemp)
 
@@ -244,10 +272,13 @@ with open(output_path, "w", encoding="utf-8") as out:
   FILTERED_REVIEW_LEN=$(wc -c < "$FILTERED_REVIEW_FILE" | tr -d '[:space:]')
   if [ "$FILTERED_REVIEW_LEN" -gt 0 ]; then
     REVIEW_FILE="$FILTERED_REVIEW_FILE"
-    echo "==> Filtered findings to current changed files."
+    log "REVIEW" "Filtered findings to current changed files"
   fi
 fi
 fi
+
+phase_end=$(date +%s)
+log "REVIEW" "Completed in $((phase_end - phase_start))s"
 
 # ---------------------------------------------------------------------------
 # 3. Use opencode (Claude Sonnet 4.6) to fix the review findings + lint/build
@@ -268,21 +299,27 @@ Rules:
 - Keep changes minimal and focused on the findings and build/lint fixes.
 - Do NOT delete or rename files unless a finding explicitly asks for it."
 
-echo "==> Running opencode to fix review findings..."
+phase_start=$(date +%s)
+log "FIX" "Starting fix phase with model $MODEL_FIX"
 opencode run \
-  -m "$MODEL" \
+  -m "$MODEL_FIX" \
   -f "$REVIEW_FILE" \
   -- "$PROMPT"
 
-echo ""
-echo "==> opencode finished. Checking for changes..."
+phase_end=$(date +%s)
+log "FIX" "Completed in $((phase_end - phase_start))s"
 
 # ---------------------------------------------------------------------------
 # 4. Commit and push
 # ---------------------------------------------------------------------------
 
+phase_start=$(date +%s)
+log "COMMIT" "Preparing commit"
 if [ -z "$(git status --porcelain)" ]; then
-  echo "No file changes were made. Nothing to commit."
+  log "COMMIT" "No file changes were made. Nothing to commit"
+  finished_at=$(date +%s)
+  log "DONE" "PR unchanged: $PR_URL"
+  log "DONE" "Total duration: $((finished_at - started_at))s"
   exit 0
 fi
 
@@ -298,7 +335,7 @@ Format: fix: <description>
 Output ONLY the raw commit message text. No markdown, no backticks, no quotes, no preamble."
 
 RAW_MSG=$(opencode run \
-  -m "github-copilot/gemini-3-flash-preview" \
+  -m "$MODEL_FIX" \
   -f "$DIFF_FILE" \
   -- "$COMMIT_PROMPT" 2>&1)
 
@@ -314,22 +351,26 @@ if [ -z "$COMMIT_MSG" ]; then
   COMMIT_MSG="fix: address PR review findings"
 fi
 
-echo "==> Committing: $COMMIT_MSG"
+log "COMMIT" "Committing with message: $COMMIT_MSG"
 git commit -m "$COMMIT_MSG"
 
-echo "==> Pushing to origin/$BRANCH..."
-git push origin "$BRANCH"
+phase_end=$(date +%s)
+log "COMMIT" "Completed in $((phase_end - phase_start))s"
 
-echo ""
-echo "==> Done! PR #$PR_NUMBER updated with fixes."
-echo "    $PR_URL"
+phase_start=$(date +%s)
+log "PUSH" "Pushing branch $BRANCH"
+git push origin "$BRANCH"
+phase_end=$(date +%s)
+log "PUSH" "Completed in $((phase_end - phase_start))s"
+
+log "DONE" "PR updated: $PR_URL"
 
 # ---------------------------------------------------------------------------
 # 5. Mark the github-actions findings comment as resolved (minimized)
 # ---------------------------------------------------------------------------
 
 if [ -n "$REVIEW_COMMENT_NODE_ID" ]; then
-  echo "==> Marking findings comment as resolved..."
+  log "PR" "Marking findings comment as resolved"
   gh api graphql -f query="
 mutation {
   minimizeComment(input: {subjectId: \"$REVIEW_COMMENT_NODE_ID\", classifier: RESOLVED}) {
@@ -337,27 +378,36 @@ mutation {
       isMinimized
     }
   }
-}" >/dev/null 2>&1 && echo "==> Comment marked as resolved." || echo "Warning: Could not minimize comment (requires write access)."
+}" >/dev/null 2>&1 && log "PR" "Comment marked as resolved" || log "PR" "Warning: Could not minimize comment (requires write access)"
 fi
 
 # ---------------------------------------------------------------------------
 # 6. Wait for required PR checks and auto-merge
 # ---------------------------------------------------------------------------
 
+phase_start=$(date +%s)
 if [ "$SKIP_MERGE" -eq 1 ]; then
-  echo "==> --skip-merge enabled. Skipping PR checks wait and auto-merge."
+  log "PR" "Skipped waiting for checks and auto-merge (--skip-merge enabled)"
+  phase_end=$(date +%s)
+  log "PR" "Completed in $((phase_end - phase_start))s"
+  finished_at=$(date +%s)
+  log "DONE" "Total duration: $((finished_at - started_at))s"
   exit 0
 fi
 
-echo "==> Waiting for required PR checks to complete..."
+log "PR" "Waiting for required PR checks"
 if ! gh pr checks "$PR_NUMBER" --watch --required; then
-  echo "Error: Required PR checks did not pass. PR was not merged."
-  exit 1
+  fail "PR" "Required PR checks did not pass. PR was not merged."
 fi
 
-echo "==> Required checks passed. Enabling auto-merge..."
+log "PR" "Required checks passed. Enabling auto-merge"
 if gh pr merge "$PR_NUMBER" --auto --delete-branch >/dev/null 2>&1; then
-  echo "==> Auto-merge enabled (or PR merged immediately)."
+  log "PR" "Auto-merge enabled (or PR merged immediately)"
 else
-  echo "Warning: Could not enable auto-merge. You may need approvals or additional permissions."
+  log "PR" "Warning: Could not enable auto-merge. You may need approvals or additional permissions"
 fi
+
+phase_end=$(date +%s)
+log "PR" "Completed in $((phase_end - phase_start))s"
+finished_at=$(date +%s)
+log "DONE" "Total duration: $((finished_at - started_at))s"
