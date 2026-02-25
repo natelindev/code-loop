@@ -13,6 +13,7 @@ set -euo pipefail
 DEFAULT_MODEL_FIX="github-copilot/claude-sonnet-4.6"
 MODEL_FIX="${OPENCODE_LOOP_MODEL_FIX:-$DEFAULT_MODEL_FIX}"
 SKIP_MERGE=0
+TARGET_BRANCH=""
 
 log() {
   local step="$1"
@@ -25,9 +26,10 @@ log() {
 usage() {
   cat <<'EOF'
 Usage:
-  pr-autofix.sh [--skip-merge]
+  pr-autofix.sh [--branch <name>] [--skip-merge]
 
 Options:
+  --branch <name>  Run against a specific local branch
   --skip-merge   Skip waiting for required checks and skip auto-merge
   -h, --help     Show this help
 
@@ -43,17 +45,28 @@ fail() {
   exit 1
 }
 
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --skip-merge)
       SKIP_MERGE=1
+      shift
+      ;;
+    --branch)
+      shift
+      if [ $# -eq 0 ]; then
+        echo "Error: --branch requires a value"
+        usage
+        exit 1
+      fi
+      TARGET_BRANCH="$1"
+      shift
       ;;
     -h|--help)
       usage
       exit 0
       ;;
     *)
-      echo "Error: Unknown option '$arg'."
+      echo "Error: Unknown option '$1'."
       usage
       exit 1
       ;;
@@ -77,12 +90,28 @@ for cmd in gh opencode jq; do
   fi
 done
 
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+BRANCH="$CURRENT_BRANCH"
+
+if [ -n "$TARGET_BRANCH" ]; then
+  BRANCH="$TARGET_BRANCH"
+  if ! git show-ref --verify --quiet "refs/heads/$TARGET_BRANCH"; then
+    fail "INIT" "Branch '$TARGET_BRANCH' does not exist locally."
+  fi
+
+  if [ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]; then
+    log "INIT" "Switching branch from $CURRENT_BRANCH to $TARGET_BRANCH"
+    if ! git checkout "$TARGET_BRANCH" >/dev/null 2>&1; then
+      fail "INIT" "Failed to checkout branch '$TARGET_BRANCH'."
+    fi
+  fi
+fi
+
 if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
   fail "INIT" "Current branch is $BRANCH. Switch to a feature branch with an open PR."
 fi
 
-log "INIT" "Branch: $BRANCH"
+log "INIT" "Target branch: $BRANCH"
 started_at=$(date +%s)
 
 # ---------------------------------------------------------------------------

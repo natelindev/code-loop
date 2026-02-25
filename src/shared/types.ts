@@ -67,6 +67,7 @@ export interface RunState {
 export interface RunOptions {
   repoPath: string;
   workflowId: string;
+  targetBranch?: string;
   prompt?: string;
   skipPlan: boolean;
   background?: boolean;
@@ -185,6 +186,7 @@ export const IPC = {
   RUN_PR_RESOLVE_MERGE: 'run:pr:resolve-merge',
   REPO_VALIDATE: 'repo:validate',
   REPO_META: 'repo:meta',
+  REPO_BRANCHES: 'repo:branches',
   REPO_PICK_FOLDER: 'repo:pick-folder',
   SHELL_OPEN_URL: 'shell:open-url',
   SHELL_OPEN_IN_VSCODE: 'shell:open-in-vscode',

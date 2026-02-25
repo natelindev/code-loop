@@ -85,3 +85,32 @@ export async function listSupportedModels(): Promise<string[]> {
     return [];
   }
 }
+
+export async function listRepoBranches(repoPath: string): Promise<{ branches: string[]; current: string | null }> {
+  try {
+    const isValid = await validateRepo(repoPath);
+    if (!isValid) return { branches: [], current: null };
+
+    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads']);
+    const branches = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    let current: string | null = null;
+    try {
+      const currentResult = await execFileAsync('git', ['-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+      const branch = currentResult.stdout.trim();
+      if (branch && branch !== 'HEAD') {
+        current = branch;
+      }
+    } catch {
+      // Detached HEAD or lookup failure.
+    }
+
+    return { branches, current };
+  } catch {
+    return { branches: [], current: null };
+  }
+}

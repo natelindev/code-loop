@@ -64,6 +64,8 @@ const api = {
   // Repo
   validateRepo: (path: string): Promise<boolean> => ipcRenderer.invoke(IPC.REPO_VALIDATE, path),
   getRepoMeta: (path: string): Promise<RepoMeta | null> => ipcRenderer.invoke(IPC.REPO_META, path),
+  listRepoBranches: (path: string): Promise<{ branches: string[]; current: string | null }> =>
+    ipcRenderer.invoke(IPC.REPO_BRANCHES, path),
   pickFolder: (): Promise<{ path: string; meta: RepoMeta | null } | { error: string } | null> =>
     ipcRenderer.invoke(IPC.REPO_PICK_FOLDER),
 

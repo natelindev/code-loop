@@ -823,6 +823,9 @@ export function startRun(options: RunOptions): string {
 
     args.push(executionPrompt);
   } else if (workflow.id === 'pr-autofix') {
+    if (options.targetBranch?.trim()) {
+      args.push('--branch', options.targetBranch.trim());
+    }
     if (!options.autoMerge) {
       args.push('--skip-merge');
     }
@@ -844,7 +847,7 @@ export function startRun(options: RunOptions): string {
     workflowId: workflow.id,
     workflowName: workflow.name,
     prompt,
-    branchName: '',
+    branchName: options.targetBranch?.trim() || '',
     status: 'running',
     currentPhase: 'INIT',
     phases,

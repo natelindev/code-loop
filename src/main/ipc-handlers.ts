@@ -10,7 +10,7 @@ import {
   mergeRunPr,
   resolveAndMergeRunPr,
 } from './script-runner';
-import { validateRepo, getRepoMeta, listSupportedModels } from './repo-scanner';
+import { validateRepo, getRepoMeta, listSupportedModels, listRepoBranches } from './repo-scanner';
 import { getMainWindow } from './index';
 import { checkLaunchRequirements } from './launch-requirements';
 import { IPC } from '../shared/types';
@@ -69,6 +69,10 @@ export function registerIpcHandlers() {
 
   ipcMain.handle(IPC.REPO_META, async (_event, repoPath: string) => {
     return getRepoMeta(repoPath);
+  });
+
+  ipcMain.handle(IPC.REPO_BRANCHES, async (_event, repoPath: string) => {
+    return listRepoBranches(repoPath);
   });
 
   ipcMain.handle(IPC.REPO_PICK_FOLDER, async () => {

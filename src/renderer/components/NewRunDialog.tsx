@@ -31,6 +31,9 @@ const MODEL_FIELDS: { key: keyof ModelConfig; label: string }[] = [
 export default function NewRunDialog({ config, initialOptions, onStart, onClose }: NewRunDialogProps) {
   const [workflowId, setWorkflowId] = useState(initialOptions?.workflowId ?? config.defaultWorkflowId ?? PREDEFINED_WORKFLOWS[0].id);
   const [repoPath, setRepoPath] = useState(initialOptions?.repoPath ?? '');
+  const [targetBranch, setTargetBranch] = useState(initialOptions?.targetBranch ?? '');
+  const [repoBranches, setRepoBranches] = useState<string[]>([]);
+  const [currentRepoBranch, setCurrentRepoBranch] = useState<string | null>(null);
   const [prompt, setPrompt] = useState(initialOptions?.prompt ?? '');
   const [skipPlan, setSkipPlan] = useState(initialOptions?.skipPlan ?? false);
   const [background, setBackground] = useState(initialOptions?.background ?? false);
@@ -50,14 +53,58 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
   const supportsPrompt = selectedWorkflow.requiresPrompt;
   const supportsBackground = selectedWorkflow.id === 'development-auto-pr';
   const supportsSkipPr = selectedWorkflow.id === 'development-auto-pr';
+  const supportsTargetBranch = selectedWorkflow.id === 'pr-autofix';
+  const modelFields = supportsTargetBranch ? MODEL_FIELDS.filter((field) => field.key === 'modelFix') : MODEL_FIELDS;
 
   useEffect(() => {
     api().listModels().then(setAvailableModels);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!repoPath.trim()) {
+      setRepoBranches([]);
+      setCurrentRepoBranch(null);
+      if (!supportsTargetBranch) {
+        setTargetBranch('');
+      }
+      return;
+    }
+
+    api()
+      .listRepoBranches(repoPath.trim())
+      .then(({ branches, current }) => {
+        if (cancelled) return;
+        setRepoBranches(branches);
+        setCurrentRepoBranch(current);
+        if (!supportsTargetBranch) {
+          setTargetBranch('');
+          return;
+        }
+
+        const preferred = targetBranch || initialOptions?.targetBranch || current || branches[0] || '';
+        if (preferred) {
+          setTargetBranch(preferred);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRepoBranches([]);
+        setCurrentRepoBranch(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repoPath, supportsTargetBranch]);
+
   const handleRepoChange = (path: string, _meta: RepoMeta | null) => {
     setRepoPath(path);
     setError(null);
+    if (!path.trim()) {
+      setTargetBranch('');
+    }
   };
 
   const setOverride = (key: keyof ModelConfig, value: string) => {
@@ -85,6 +132,10 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
       setError('Please enter a prompt');
       return;
     }
+    if (supportsTargetBranch && !targetBranch.trim()) {
+      setError('Please select a target branch for PR Autofix');
+      return;
+    }
 
     setStarting(true);
     setError(null);
@@ -92,6 +143,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
     const options: RunOptions = {
       repoPath: repoPath.trim(),
       workflowId,
+      targetBranch: supportsTargetBranch ? targetBranch.trim() : undefined,
       prompt: supportsPrompt ? prompt.trim() : undefined,
       skipPlan: supportsPrompt ? skipPlan : false,
       background: supportsBackground ? background : false,
@@ -139,6 +191,9 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
                   setSkipPr(false);
                   setSkipPlan(false);
                 }
+                if (selected?.id !== 'pr-autofix') {
+                  setTargetBranch('');
+                }
               }}
             >
               <SelectTrigger className="h-9 bg-background">
@@ -152,6 +207,27 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
             </Select>
             <p className="text-xs text-muted-foreground">{selectedWorkflow.description}</p>
           </div>
+
+          {supportsTargetBranch && (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">PR Branch</Label>
+              <Select value={targetBranch} onValueChange={setTargetBranch}>
+                <SelectTrigger className="h-9 bg-background">
+                  <SelectValue placeholder="Select branch with open PR" />
+                </SelectTrigger>
+                <SelectContent>
+                  {repoBranches.map((branch) => (
+                    <SelectItem key={branch} value={branch}>
+                      {branch}{currentRepoBranch === branch ? ' (current)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                PR Autofix runs against the selected local branch and expects an open PR for that branch.
+              </p>
+            </div>
+          )}
 
           {/* Skip plan toggle */}
           {supportsPrompt && (
@@ -255,7 +331,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
                     Reset to defaults
                   </Button>
                 </div>
-                {MODEL_FIELDS.map(({ key, label }) => (
+                {modelFields.map(({ key, label }) => (
                   <div key={key} className="flex items-center justify-between gap-3">
                     <Label className="text-xs text-muted-foreground w-20 shrink-0">{label}</Label>
                     <Select
