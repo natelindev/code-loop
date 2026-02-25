@@ -111,6 +111,7 @@ export default function App() {
         ) : selectedRun ? (
           <RunPanel
             run={selectedRun}
+            config={config}
             onStop={stopRun}
             onRerun={(options) => {
               setNewRunPreset(options);

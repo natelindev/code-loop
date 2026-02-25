@@ -59,6 +59,7 @@ export interface RunState {
   logFilePath: string | null;
   logFileOffset: number;
   autoMerge: boolean;
+  skipPr: boolean;
 }
 
 export interface RunOptions {
@@ -69,6 +70,7 @@ export interface RunOptions {
   planText?: string;
   modelOverrides?: Partial<ModelConfig>;
   autoMerge?: boolean;
+  skipPr?: boolean;
 }
 
 export interface PrStatusPayload {
@@ -109,6 +111,8 @@ export interface AppConfig {
   autoApproveExternalDirectory: boolean;
   launchChecksPassed: boolean;
   recentRepos: string[];
+  branchPrefix: string;
+  skipPr: boolean;
 }
 
 export interface RepoMeta {
@@ -154,6 +158,7 @@ export const IPC = {
   REPO_META: 'repo:meta',
   REPO_PICK_FOLDER: 'repo:pick-folder',
   SHELL_OPEN_URL: 'shell:open-url',
+  SHELL_OPEN_IN_VSCODE: 'shell:open-in-vscode',
   MODELS_LIST: 'models:list',
   APP_LAUNCH_REQUIREMENTS: 'app:launch-requirements',
 } as const;

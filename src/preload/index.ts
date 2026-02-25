@@ -69,6 +69,7 @@ const api = {
 
   // Shell
   openUrl: (url: string): Promise<void> => ipcRenderer.invoke(IPC.SHELL_OPEN_URL, url),
+  openInVscode: (folderPath: string): Promise<boolean> => ipcRenderer.invoke(IPC.SHELL_OPEN_IN_VSCODE, folderPath),
 
   // Models
   listModels: (): Promise<string[]> => ipcRenderer.invoke(IPC.MODELS_LIST),

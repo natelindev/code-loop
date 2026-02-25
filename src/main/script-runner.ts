@@ -204,6 +204,7 @@ function loadPersistedRuns() {
       loadedRun.logFilePath = loadedRun.logFilePath ?? null;
       loadedRun.logFileOffset = loadedRun.logFileOffset ?? 0;
       loadedRun.autoMerge = loadedRun.autoMerge ?? false;
+      loadedRun.skipPr = loadedRun.skipPr ?? false;
       loadedRun.prTitle = loadedRun.prTitle ?? null;
       loadedRun.prNumber = loadedRun.prNumber ?? null;
       loadedRun.prHeadRef = loadedRun.prHeadRef ?? null;
@@ -247,10 +248,12 @@ function loadPersistedRuns() {
 
 loadPersistedRuns();
 
-function createInitialPhases(skipPlan: boolean): Record<string, PhaseStatus> {
+function createInitialPhases(skipPlan: boolean, skipPr: boolean): Record<string, PhaseStatus> {
   const phases: Record<string, PhaseStatus> = {};
   for (const phase of PIPELINE_PHASES) {
     if (phase === 'PLAN' && skipPlan) {
+      phases[phase] = 'skipped';
+    } else if ((phase === 'PR' || phase === 'PUSH') && skipPr) {
       phases[phase] = 'skipped';
     } else {
       phases[phase] = 'pending';
@@ -744,6 +747,8 @@ export function startRun(options: RunOptions): string {
     OPENCODE_LOOP_MAX_RETRIES: String(config.maxRetries),
     OPENCODE_LOOP_NOTIFICATION_SOUND: String(config.notificationSound),
     OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY: String(config.autoApproveExternalDirectory),
+    OPENCODE_LOOP_BRANCH_PREFIX: config.branchPrefix || 'codeloop',
+    OPENCODE_LOOP_SKIP_PR: String(options.skipPr ?? config.skipPr ?? false),
   };
 
   const runMode = options.background ? 'background' : 'foreground';
@@ -763,6 +768,10 @@ export function startRun(options: RunOptions): string {
     args.push('--skip-plan');
   }
 
+  if (options.skipPr) {
+    args.push('--skip-pr');
+  }
+
   // Add the prompt
   args.push(options.prompt);
 
@@ -776,7 +785,7 @@ export function startRun(options: RunOptions): string {
     branchName: '',
     status: 'running',
     currentPhase: 'INIT',
-    phases: createInitialPhases(options.skipPlan),
+    phases: createInitialPhases(options.skipPlan, !!options.skipPr),
     logs: [],
     prUrl: null,
     prTitle: null,
@@ -796,6 +805,7 @@ export function startRun(options: RunOptions): string {
     logFilePath: null,
     logFileOffset: 0,
     autoMerge: !!options.autoMerge,
+    skipPr: !!options.skipPr,
   };
 
   const child = spawn('bash', [scriptPath, ...args], {

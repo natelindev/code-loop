@@ -2,17 +2,18 @@ import { useState, useEffect } from 'react';
 import PhaseTracker from './PhaseTracker';
 import LogViewer from './LogViewer';
 import api from '../lib/ipc';
-import type { RunState, RunOptions } from '@shared/types';
+import type { RunState, RunOptions, AppConfig } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { Badge } from '@shared/components/ui/badge';
 import { Card } from '@shared/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@shared/components/ui/dialog';
-import { Square, ExternalLink, Copy, CheckCircle2, XCircle, StopCircle, GitBranch, ChevronDown, ChevronRight, RotateCcw, Loader2, RefreshCw } from 'lucide-react';
+import { Square, ExternalLink, Copy, CheckCircle2, XCircle, StopCircle, GitBranch, ChevronDown, ChevronRight, RotateCcw, Loader2, RefreshCw, Code2 } from 'lucide-react';
 import { cn } from '@shared/lib/utils';
 import { getSubAgentActivity } from '../lib/sub-agent';
 
 interface RunPanelProps {
   run: RunState;
+  config: AppConfig;
   onStop: (runId: string) => void;
   onRerun: (options: RunOptions) => void;
 }
@@ -62,7 +63,7 @@ function statusIndicator(status: RunState['status']) {
   }
 }
 
-export default function RunPanel({ run, onStop, onRerun }: RunPanelProps) {
+export default function RunPanel({ run, config, onStop, onRerun }: RunPanelProps) {
   const [_tick, setTick] = useState(0);
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [prActionBusy, setPrActionBusy] = useState<'refresh' | 'merge' | 'resolve' | null>(null);
@@ -98,6 +99,17 @@ export default function RunPanel({ run, onStop, onRerun }: RunPanelProps) {
     !!run.planText?.trim() &&
     (planPhase === 'completed' || planPhase === 'skipped');
 
+  // Compute work directory for skipPr (commit-only) runs
+  const workDir = run.branchName && config.workspaceRoot
+    ? `${config.workspaceRoot}/${run.branchName.replace(/\//g, '-')}`
+    : null;
+
+  const handleOpenInVscode = () => {
+    if (workDir) {
+      api().openInVscode(workDir);
+    }
+  };
+
   const handleRerun = () => {
     if (!run.planText?.trim()) return;
     onRerun({
@@ -106,6 +118,7 @@ export default function RunPanel({ run, onStop, onRerun }: RunPanelProps) {
       skipPlan: true,
       background: run.background,
       autoMerge: run.autoMerge,
+      skipPr: run.skipPr,
       planText: run.planText,
       modelOverrides: run.modelOverrides ?? undefined,
     });
@@ -251,6 +264,17 @@ export default function RunPanel({ run, onStop, onRerun }: RunPanelProps) {
             >
               <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
               Open PR
+            </Button>
+          )}
+          {run.skipPr && workDir && run.status !== 'running' && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleOpenInVscode}
+              className="h-8 text-xs bg-blue-600 hover:bg-blue-500 text-white shadow-sm hover:shadow-blue-500/20 transition-all"
+            >
+              <Code2 className="w-3.5 h-3.5 mr-1.5" />
+              Open in VSCode
             </Button>
           )}
           <Button

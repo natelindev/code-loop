@@ -27,6 +27,8 @@ const DEFAULT_CONFIG: AppConfig = {
   autoApproveExternalDirectory: false,
   launchChecksPassed: false,
   recentRepos: [],
+  branchPrefix: 'codeloop',
+  skipPr: false,
 };
 
 export function resolveScriptPath(): string {
@@ -124,6 +126,8 @@ fi
 
 NOTIFICATION_SOUND=${config.notificationSound}
 AUTO_APPROVE_EXTERNAL_DIRECTORY=${config.autoApproveExternalDirectory}
+BRANCH_PREFIX="${config.branchPrefix}"
+SKIP_PR=${config.skipPr}
 `;
 
   try {

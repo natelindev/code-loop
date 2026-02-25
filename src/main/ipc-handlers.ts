@@ -1,4 +1,5 @@
 import { ipcMain, dialog, shell } from 'electron';
+import { execFile } from 'child_process';
 import { loadConfig, saveConfig } from './config-manager';
 import {
   startRun,
@@ -88,6 +89,19 @@ export function registerIpcHandlers() {
   // Shell
   ipcMain.handle(IPC.SHELL_OPEN_URL, (_event, url: string) => {
     return shell.openExternal(url);
+  });
+
+  ipcMain.handle(IPC.SHELL_OPEN_IN_VSCODE, (_event, folderPath: string) => {
+    return new Promise<boolean>((resolve) => {
+      execFile('code', [folderPath], (err) => {
+        if (err) {
+          // Fallback: try to open via shell
+          shell.openPath(folderPath).then(() => resolve(true)).catch(() => resolve(false));
+        } else {
+          resolve(true);
+        }
+      });
+    });
   });
 
   // Models

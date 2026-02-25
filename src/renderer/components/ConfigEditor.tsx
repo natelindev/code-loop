@@ -185,6 +185,29 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
                   <span className="text-sm font-medium">{draft.autoApproveExternalDirectory ? 'Auto-approve enabled' : 'Auto-approve disabled'}</span>
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <Label>Branch Name Prefix</Label>
+                <p className="text-xs text-muted-foreground">Prefix used for generated branch names (e.g. prefix/task-slug)</p>
+                <Input
+                  value={draft.branchPrefix}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, branchPrefix: e.target.value }))}
+                  placeholder="codeloop"
+                  className="w-48 font-mono text-sm bg-background/50"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <Label>Skip PR Creation</Label>
+                <p className="text-xs text-muted-foreground">Commit only — do not push or create a pull request (can be overridden per run)</p>
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={draft.skipPr}
+                    onCheckedChange={(checked) => setDraft((prev) => ({ ...prev, skipPr: checked }))}
+                  />
+                  <span className="text-sm font-medium">{draft.skipPr ? 'Commit only' : 'Push + PR'}</span>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

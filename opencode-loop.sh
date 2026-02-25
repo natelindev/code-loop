@@ -72,6 +72,7 @@ RUN_MODE="bg"
 DO_INIT=0
 DO_DRY_RUN=0
 SKIP_PLAN=0
+SKIP_PR=0
 LOG_OPENCODE_DETAIL=0
 PLAN_TEXT=""
 PLAN_FILE_PATH=""
@@ -123,6 +124,7 @@ Options:
   --config <path>     Use custom config file
   --dry-run           Validate config + dependencies + repo context only
   --skip-plan         Skip the planning phase (provide plan via --plan-file or in prompt)
+  --skip-pr           Skip the push and PR phases (commit only)
   --plan-file <path>  Path to a file containing a pre-written plan
   --repo-dir <path>   Run against a specific repo directory
   --log-opencode      Log detailed output from opencode run calls
@@ -134,7 +136,8 @@ Environment variable overrides (take precedence over config file):
   OPENCODE_LOOP_MODEL_FIX, OPENCODE_LOOP_MODEL_COMMIT,
   OPENCODE_LOOP_MODEL_PR, OPENCODE_LOOP_MODEL_BRANCH,
   OPENCODE_LOOP_MAX_RETRIES, OPENCODE_LOOP_NOTIFICATION_SOUND,
-  OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY
+  OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY,
+  OPENCODE_LOOP_BRANCH_PREFIX, OPENCODE_LOOP_SKIP_PR
 EOF
 }
 
@@ -236,6 +239,8 @@ load_config() {
   [ -n "${OPENCODE_LOOP_NOTIFICATION_SOUND:-}" ] && NOTIFICATION_SOUND="$OPENCODE_LOOP_NOTIFICATION_SOUND"
   [ -n "${OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY:-}" ] && AUTO_APPROVE_EXTERNAL_DIRECTORY="$OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY"
   [ -n "${OPENCODE_LOOP_LOG_OPENCODE_DETAIL:-}" ] && LOG_OPENCODE_DETAIL="$OPENCODE_LOOP_LOG_OPENCODE_DETAIL"
+  [ -n "${OPENCODE_LOOP_BRANCH_PREFIX:-}" ] && BRANCH_PREFIX="$OPENCODE_LOOP_BRANCH_PREFIX"
+  [ -n "${OPENCODE_LOOP_SKIP_PR:-}" ] && SKIP_PR="$OPENCODE_LOOP_SKIP_PR"
 
   case "$(printf '%s' "${LOG_OPENCODE_DETAIL:-}" | tr '[:upper:]' '[:lower:]')" in
     1|true|yes|on)
@@ -252,6 +257,17 @@ load_config() {
       ;;
     *)
       AUTO_APPROVE_EXTERNAL_DIRECTORY="false"
+      ;;
+  esac
+
+  BRANCH_PREFIX="${BRANCH_PREFIX:-codeloop}"
+
+  case "$(printf '%s' "${SKIP_PR:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      SKIP_PR=1
+      ;;
+    *)
+      SKIP_PR=0
       ;;
   esac
 }
@@ -631,7 +647,7 @@ generate_branch_name() {
     cleaned="task-$RANDOM"
   fi
 
-  BRANCH_NAME="opencode/$cleaned"
+  BRANCH_NAME="$BRANCH_PREFIX/$cleaned"
 }
 
 setup_target_paths() {
@@ -1044,6 +1060,18 @@ Output ONLY the raw commit message text. No markdown, no backticks, no quotes, n
   log "COMMIT" "Committing with message: $commit_msg"
   git commit -m "$commit_msg" >/dev/null || return 1
 
+  if [ "$SKIP_PR" -eq 1 ]; then
+    log "PUSH" "Skipped (commit-only mode)"
+    log "PR" "Skipped (commit-only mode)"
+    log "DONE" "Commit completed in branch $BRANCH_NAME"
+    log "DONE" "Work directory: $TARGET_DIR"
+    local finished_at
+    finished_at=$(date +%s)
+    log "DONE" "Total duration: $((finished_at - started_at))s"
+    report_model_costs "$did_run_fix"
+    return 0
+  fi
+
   log "PUSH" "Pushing branch $BRANCH_NAME"
   resolve_repo_and_push_target
   if [ -z "$REPO" ]; then
@@ -1162,6 +1190,10 @@ parse_args() {
         SKIP_PLAN=1
         shift
         ;;
+      --skip-pr)
+        SKIP_PR=1
+        shift
+        ;;
       --plan-file)
         if [ $# -lt 2 ]; then
           echo "Error: --plan-file requires a path"
@@ -1278,6 +1310,7 @@ main() {
       OPENCODE_LOOP_PROMPT="$USER_PROMPT" \
       OPENCODE_LOOP_BRANCH_NAME="$BRANCH_NAME" \
       OPENCODE_LOOP_LOG_OPENCODE_DETAIL="$LOG_OPENCODE_DETAIL" \
+      OPENCODE_LOOP_SKIP_PR="$SKIP_PR" \
       "$0" --fg --config "$CONFIG_FILE" >/dev/null 2>&1 &
     pid=$!
     disown "$pid" || true
@@ -1304,7 +1337,11 @@ main() {
 
   if run_pipeline; then
     cleanup_plan_file
-    notify_success "$PR_URL"
+    if [ "$SKIP_PR" -eq 1 ]; then
+      notify_success "Commit completed in $TARGET_DIR"
+    else
+      notify_success "$PR_URL"
+    fi
   else
     cleanup_plan_file
     notify_error "OpenCode Loop failed. Check log: $LOG_FILE"

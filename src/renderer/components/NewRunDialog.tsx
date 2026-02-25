@@ -34,6 +34,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
   const [skipPlan, setSkipPlan] = useState(initialOptions?.skipPlan ?? false);
   const [background, setBackground] = useState(initialOptions?.background ?? false);
   const [autoMerge, setAutoMerge] = useState(initialOptions?.autoMerge ?? false);
+  const [skipPr, setSkipPr] = useState(initialOptions?.skipPr ?? config.skipPr ?? false);
   const [planText, setPlanText] = useState(initialOptions?.planText ?? '');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [modelOverrides, setModelOverrides] = useState<Partial<ModelConfig>>({
@@ -54,6 +55,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
     setSkipPlan(initialOptions?.skipPlan ?? false);
     setBackground(initialOptions?.background ?? false);
     setAutoMerge(initialOptions?.autoMerge ?? false);
+    setSkipPr(initialOptions?.skipPr ?? config.skipPr ?? false);
     setPlanText(initialOptions?.planText ?? '');
     setModelOverrides({
       ...config.lastModelOverrides,
@@ -102,6 +104,7 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
       skipPlan,
       background,
       autoMerge,
+      skipPr,
       planText: skipPlan ? planText.trim() : undefined,
       modelOverrides: Object.keys(modelOverrides).length > 0 ? modelOverrides : undefined,
     };
@@ -153,7 +156,15 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
               <Label className="text-sm font-medium">Auto Merge PR</Label>
               <p className="text-xs text-muted-foreground">After PR creation, automatically merge when mergeable (default off)</p>
             </div>
-            <Switch checked={autoMerge} onCheckedChange={setAutoMerge} />
+            <Switch checked={autoMerge} onCheckedChange={setAutoMerge} disabled={skipPr} />
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Skip PR (Commit Only)</Label>
+              <p className="text-xs text-muted-foreground">Only commit changes locally — do not push or create a pull request</p>
+            </div>
+            <Switch checked={skipPr} onCheckedChange={(checked) => { setSkipPr(checked); if (checked) setAutoMerge(false); }} />
           </div>
 
           {/* Plan text area */}
