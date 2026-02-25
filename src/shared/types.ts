@@ -35,6 +35,8 @@ export interface RunState {
   id: string;
   repoPath: string;
   repoName: string;
+  workflowId: string;
+  workflowName: string;
   prompt: string;
   branchName: string;
   status: RunStatus;
@@ -64,6 +66,7 @@ export interface RunState {
 
 export interface RunOptions {
   repoPath: string;
+  workflowId: string;
   prompt?: string;
   skipPlan: boolean;
   background?: boolean;
@@ -102,6 +105,7 @@ export interface ModelConfig {
 
 export interface AppConfig {
   workspaceRoot: string;
+  defaultWorkflowId: string;
   models: ModelConfig;
   lastModelOverrides: Partial<ModelConfig>;
   postCloneCommands: string[];
@@ -114,6 +118,31 @@ export interface AppConfig {
   branchPrefix: string;
   skipPr: boolean;
 }
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  description: string;
+  scriptFile: string;
+  requiresPrompt: boolean;
+}
+
+export const PREDEFINED_WORKFLOWS: WorkflowDefinition[] = [
+  {
+    id: 'development-auto-pr',
+    name: 'Development + Auto PR',
+    description: 'Runs the full development pipeline: plan, implement, review, fix, commit, push, and PR.',
+    scriptFile: 'development-auto-pr.sh',
+    requiresPrompt: true,
+  },
+  {
+    id: 'pr-autofix',
+    name: 'PR Autofix',
+    description: 'Finds CI review findings on the current PR, applies fixes, and updates the branch.',
+    scriptFile: 'pr-autofix.sh',
+    requiresPrompt: false,
+  },
+];
 
 export interface RepoMeta {
   path: string;

@@ -114,6 +114,7 @@ export default function RunPanel({ run, config, onStop, onRerun }: RunPanelProps
     if (!run.planText?.trim()) return;
     onRerun({
       repoPath: run.repoPath,
+      workflowId: run.workflowId,
       prompt: run.prompt,
       skipPlan: true,
       background: run.background,

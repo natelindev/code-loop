@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import RepoPicker from './RepoPicker';
 import api from '../lib/ipc';
+import { PREDEFINED_WORKFLOWS } from '@shared/types';
 import type { AppConfig, RunOptions, ModelConfig, RepoMeta } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
-import { Input } from '@shared/components/ui/input';
 import { Label } from '@shared/components/ui/label';
 import { Switch } from '@shared/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@shared/components/ui/select';
@@ -29,6 +29,7 @@ const MODEL_FIELDS: { key: keyof ModelConfig; label: string }[] = [
 ];
 
 export default function NewRunDialog({ config, initialOptions, onStart, onClose }: NewRunDialogProps) {
+  const [workflowId, setWorkflowId] = useState(initialOptions?.workflowId ?? config.defaultWorkflowId ?? PREDEFINED_WORKFLOWS[0].id);
   const [repoPath, setRepoPath] = useState(initialOptions?.repoPath ?? '');
   const [prompt, setPrompt] = useState(initialOptions?.prompt ?? '');
   const [skipPlan, setSkipPlan] = useState(initialOptions?.skipPlan ?? false);
@@ -45,24 +46,14 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const selectedWorkflow = PREDEFINED_WORKFLOWS.find((workflow) => workflow.id === workflowId) ?? PREDEFINED_WORKFLOWS[0];
+  const supportsPrompt = selectedWorkflow.requiresPrompt;
+  const supportsBackground = selectedWorkflow.id === 'development-auto-pr';
+  const supportsSkipPr = selectedWorkflow.id === 'development-auto-pr';
+
   useEffect(() => {
     api().listModels().then(setAvailableModels);
   }, []);
-
-  useEffect(() => {
-    setRepoPath(initialOptions?.repoPath ?? '');
-    setPrompt(initialOptions?.prompt ?? '');
-    setSkipPlan(initialOptions?.skipPlan ?? false);
-    setBackground(initialOptions?.background ?? false);
-    setAutoMerge(initialOptions?.autoMerge ?? false);
-    setSkipPr(initialOptions?.skipPr ?? config.skipPr ?? false);
-    setPlanText(initialOptions?.planText ?? '');
-    setModelOverrides({
-      ...config.lastModelOverrides,
-      ...(initialOptions?.modelOverrides ?? {}),
-    });
-    setError(null);
-  }, [config.lastModelOverrides, initialOptions]);
 
   const handleRepoChange = (path: string, _meta: RepoMeta | null) => {
     setRepoPath(path);
@@ -86,11 +77,11 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
       setError('Please select a repository');
       return;
     }
-    if (skipPlan && !planText.trim()) {
+    if (supportsPrompt && skipPlan && !planText.trim()) {
       setError('Please provide a plan when skipping the plan phase');
       return;
     }
-    if (!skipPlan && !prompt.trim()) {
+    if (supportsPrompt && !skipPlan && !prompt.trim()) {
       setError('Please enter a prompt');
       return;
     }
@@ -100,12 +91,13 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
 
     const options: RunOptions = {
       repoPath: repoPath.trim(),
-      prompt: prompt.trim(),
-      skipPlan,
-      background,
+      workflowId,
+      prompt: supportsPrompt ? prompt.trim() : undefined,
+      skipPlan: supportsPrompt ? skipPlan : false,
+      background: supportsBackground ? background : false,
       autoMerge,
-      skipPr,
-      planText: skipPlan ? planText.trim() : undefined,
+      skipPr: supportsSkipPr ? skipPr : false,
+      planText: supportsPrompt && skipPlan ? planText.trim() : undefined,
       modelOverrides: Object.keys(modelOverrides).length > 0 ? modelOverrides : undefined,
     };
 
@@ -134,21 +126,54 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
             <RepoPicker config={config} value={repoPath} onChange={handleRepoChange} />
           </div>
 
-          {/* Skip plan toggle */}
-          <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
-            <div className="space-y-0.5">
-              <Label className="text-sm font-medium">Skip Plan Phase</Label>
-              <p className="text-xs text-muted-foreground">Provide your own implementation plan</p>
-            </div>
-            <Switch checked={skipPlan} onCheckedChange={setSkipPlan} />
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Workflow</Label>
+            <Select
+              value={workflowId}
+              onValueChange={(value) => {
+                setWorkflowId(value);
+                setError(null);
+                const selected = PREDEFINED_WORKFLOWS.find((workflow) => workflow.id === value);
+                if (selected?.id !== 'development-auto-pr') {
+                  setBackground(false);
+                  setSkipPr(false);
+                  setSkipPlan(false);
+                }
+              }}
+            >
+              <SelectTrigger className="h-9 bg-background">
+                <SelectValue placeholder="Select workflow" />
+              </SelectTrigger>
+              <SelectContent>
+                {PREDEFINED_WORKFLOWS.map((workflow) => (
+                  <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{selectedWorkflow.description}</p>
           </div>
+
+          {/* Skip plan toggle */}
+          {supportsPrompt && (
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium">Skip Plan Phase</Label>
+                <p className="text-xs text-muted-foreground">Provide your own implementation plan</p>
+              </div>
+              <Switch checked={skipPlan} onCheckedChange={setSkipPlan} />
+            </div>
+          )}
 
           <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
             <div className="space-y-0.5">
               <Label className="text-sm font-medium">Run in Background</Label>
-              <p className="text-xs text-muted-foreground">Keeps running even after app quit; logs still stream while app is open</p>
+              <p className="text-xs text-muted-foreground">
+                {supportsBackground
+                  ? 'Keeps running even after app quit; logs still stream while app is open'
+                  : 'This workflow currently runs in foreground only'}
+              </p>
             </div>
-            <Switch checked={background} onCheckedChange={setBackground} />
+            <Switch checked={supportsBackground ? background : false} onCheckedChange={setBackground} disabled={!supportsBackground} />
           </div>
 
           <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
@@ -162,13 +187,21 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
           <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
             <div className="space-y-0.5">
               <Label className="text-sm font-medium">Skip PR (Commit Only)</Label>
-              <p className="text-xs text-muted-foreground">Only commit changes locally — do not push or create a pull request</p>
+              <p className="text-xs text-muted-foreground">
+                {supportsSkipPr
+                  ? 'Only commit changes locally — do not push or create a pull request'
+                  : 'This option is only available for Development + Auto PR'}
+              </p>
             </div>
-            <Switch checked={skipPr} onCheckedChange={(checked) => { setSkipPr(checked); if (checked) setAutoMerge(false); }} />
+            <Switch
+              checked={supportsSkipPr ? skipPr : false}
+              onCheckedChange={(checked) => { setSkipPr(checked); if (checked) setAutoMerge(false); }}
+              disabled={!supportsSkipPr}
+            />
           </div>
 
           {/* Plan text area */}
-          {skipPlan && (
+          {supportsPrompt && skipPlan && (
             <div className="space-y-2 animate-in slide-in-from-top-2 fade-in duration-300">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Custom Plan</Label>
               <textarea
@@ -182,20 +215,22 @@ export default function NewRunDialog({ config, initialOptions, onStart, onClose 
           )}
 
           {/* Prompt */}
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              {skipPlan ? 'Task Description (Optional)' : 'Prompt'}
-            </Label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={skipPlan
-                ? 'Optional: add extra context beyond your plan...'
-                : 'Describe the task you want to accomplish...'}
-              rows={4}
-              className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
-            />
-          </div>
+          {supportsPrompt && (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {skipPlan ? 'Task Description (Optional)' : 'Prompt'}
+              </Label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={skipPlan
+                  ? 'Optional: add extra context beyond your plan...'
+                  : 'Describe the task you want to accomplish...'}
+                rows={4}
+                className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+              />
+            </div>
+          )}
 
           {/* Advanced: model overrides */}
           <div className="pt-2 border-t border-border/50">

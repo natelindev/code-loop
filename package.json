@@ -29,8 +29,8 @@
     ],
     "extraResources": [
       {
-        "from": "opencode-loop.sh",
-        "to": "opencode-loop.sh"
+        "from": "scripts",
+        "to": "scripts"
       },
       {
         "from": "logo.png",

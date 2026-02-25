@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { AppConfig, ModelConfig } from '../shared/types';
+import { PREDEFINED_WORKFLOWS } from '../shared/types';
+import type { AppConfig, ModelConfig, WorkflowDefinition } from '../shared/types';
 
 const CONFIG_PATH = path.join(os.homedir(), '.opencode-loop-app.json');
 const BASH_CONFIG_PATH = path.join(os.homedir(), '.opencode-loop.conf');
@@ -16,8 +17,11 @@ const DEFAULT_MODELS: ModelConfig = {
   modelBranch: 'github-copilot/gemini-3-flash-preview',
 };
 
+const DEFAULT_WORKFLOW_ID = PREDEFINED_WORKFLOWS[0].id;
+
 const DEFAULT_CONFIG: AppConfig = {
   workspaceRoot: path.join(os.homedir(), 'codeloop-workspaces'),
+  defaultWorkflowId: DEFAULT_WORKFLOW_ID,
   models: { ...DEFAULT_MODELS },
   lastModelOverrides: {},
   postCloneCommands: ['pnpm i'],
@@ -31,19 +35,38 @@ const DEFAULT_CONFIG: AppConfig = {
   skipPr: false,
 };
 
-export function resolveScriptPath(): string {
+export function listPredefinedWorkflows(): WorkflowDefinition[] {
+  return PREDEFINED_WORKFLOWS.map((workflow) => ({ ...workflow }));
+}
+
+export function getWorkflowById(workflowId: string): WorkflowDefinition {
+  return PREDEFINED_WORKFLOWS.find((workflow) => workflow.id === workflowId) ?? PREDEFINED_WORKFLOWS[0];
+}
+
+export function resolveScriptPath(workflowId: string): string {
+  const workflow = getWorkflowById(workflowId);
+  const scriptFile = workflow.scriptFile;
   const candidates = [
-    path.resolve(__dirname, '../../opencode-loop.sh'),
-    path.resolve(__dirname, '../../../opencode-loop.sh'),
-    path.resolve(process.cwd(), 'opencode-loop.sh'),
-    path.resolve(process.resourcesPath, 'opencode-loop.sh'),
+    path.resolve(__dirname, '../../scripts', scriptFile),
+    path.resolve(__dirname, '../../../scripts', scriptFile),
+    path.resolve(process.cwd(), 'scripts', scriptFile),
+    path.resolve(process.resourcesPath, 'scripts', scriptFile),
   ];
+
+  if (workflow.id === 'development-auto-pr') {
+    candidates.push(
+      path.resolve(__dirname, '../../opencode-loop.sh'),
+      path.resolve(__dirname, '../../../opencode-loop.sh'),
+      path.resolve(process.cwd(), 'opencode-loop.sh'),
+      path.resolve(process.resourcesPath, 'opencode-loop.sh')
+    );
+  }
 
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
 
-  return path.resolve(process.cwd(), 'opencode-loop.sh');
+  return path.resolve(process.cwd(), 'scripts', scriptFile);
 }
 
 export function loadConfig(): AppConfig {
@@ -53,9 +76,14 @@ export function loadConfig(): AppConfig {
       const parsed = JSON.parse(raw);
       const parsedWithoutScriptPath = { ...(parsed as Record<string, unknown>) };
       delete parsedWithoutScriptPath.scriptPath;
+      const defaultWorkflowId = String(parsedWithoutScriptPath.defaultWorkflowId ?? DEFAULT_WORKFLOW_ID);
+      const safeWorkflowId = PREDEFINED_WORKFLOWS.some((workflow) => workflow.id === defaultWorkflowId)
+        ? defaultWorkflowId
+        : DEFAULT_WORKFLOW_ID;
       return {
         ...DEFAULT_CONFIG,
         ...parsedWithoutScriptPath,
+        defaultWorkflowId: safeWorkflowId,
         models: { ...DEFAULT_MODELS, ...(parsedWithoutScriptPath.models as Partial<ModelConfig> | undefined) },
         lastModelOverrides: {
           ...(parsedWithoutScriptPath.lastModelOverrides as Partial<ModelConfig> | undefined),
@@ -95,10 +123,17 @@ export function loadConfig(): AppConfig {
 }
 
 export function saveConfig(config: AppConfig): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  const safeConfig: AppConfig = {
+    ...config,
+    defaultWorkflowId: PREDEFINED_WORKFLOWS.some((workflow) => workflow.id === config.defaultWorkflowId)
+      ? config.defaultWorkflowId
+      : DEFAULT_WORKFLOW_ID,
+  };
+
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(safeConfig, null, 2), 'utf-8');
 
   // Also regenerate bash config for CLI compatibility
-  generateBashConfig(config);
+  generateBashConfig(safeConfig);
 }
 
 function generateBashConfig(config: AppConfig): void {

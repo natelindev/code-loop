@@ -4,7 +4,7 @@ CodeLoop is a sophisticated Electron-based desktop application that provides a m
 
 ![CodeLoop Screenshot](screenshot.png)
 
-At its core, CodeLoop orchestrates an internal pipeline script to run multi-step workflows using various large language models.
+At its core, CodeLoop orchestrates predefined workflow scripts in `scripts/` (for example, `development-auto-pr.sh` and `pr-autofix.sh`) to run multi-step automation with various large language models.
 
 ## 🚀 Key Features
 
@@ -14,6 +14,7 @@ At its core, CodeLoop orchestrates an internal pipeline script to run multi-step
 - **Configurable Workspaces**: Easily manage your development root and custom post-clone setup commands.
 - **Repository Picker**: Quick access to recent repositories and easy validation of local git repos.
 - **Interactive Configuration**: Fine-tune specific models for each phase of the pipeline (e.g., use Claude for planning and GPT for reviewing).
+- **Workflow Selection**: Choose a predefined workflow at run start, with a configurable default workflow in Settings.
 
 ## 🛠️ Prerequisites
 

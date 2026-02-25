@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Anser from 'anser';
 import { promisify } from 'util';
 import { sendToRenderer, showNotification } from './index';
-import { loadConfig, addRecentRepo, resolveScriptPath } from './config-manager';
+import { loadConfig, addRecentRepo, resolveScriptPath, getWorkflowById } from './config-manager';
 import { shell } from 'electron';
 import type {
   RunState,
@@ -227,6 +227,10 @@ function loadPersistedRuns() {
         phases: { ...run.phases },
         logs: Array.isArray(run.logs) ? run.logs : [],
       };
+
+      const loadedWorkflow = getWorkflowById(loadedRun.workflowId ?? 'development-auto-pr');
+      loadedRun.workflowId = loadedWorkflow.id;
+      loadedRun.workflowName = loadedRun.workflowName ?? loadedWorkflow.name;
 
       loadedRun.runMode = loadedRun.runMode ?? 'foreground';
       loadedRun.background = loadedRun.background ?? loadedRun.runMode === 'background';
@@ -754,20 +758,23 @@ async function maybeAutoMergeRun(runId: string, state: RunState) {
 export function startRun(options: RunOptions): string {
   const runId = uuidv4();
   const config = loadConfig();
+  const workflow = getWorkflowById(options.workflowId || config.defaultWorkflowId);
   const prompt = options.prompt?.trim() ?? '';
   const planText = options.planText?.trim() ?? '';
 
-  if (options.skipPlan && !planText) {
+  if (workflow.requiresPrompt && options.skipPlan && !planText) {
     throw new Error('Plan text is required when skipping the plan phase');
   }
 
-  if (!options.skipPlan && !prompt) {
+  if (workflow.requiresPrompt && !options.skipPlan && !prompt) {
     throw new Error('Prompt is required');
   }
 
-  const executionPrompt = prompt || 'Use the provided implementation plan.';
+  const executionPrompt = workflow.requiresPrompt
+    ? (prompt || 'Use the provided implementation plan.')
+    : (prompt || `Run the ${workflow.name} workflow.`);
 
-  const scriptPath = resolveScriptPath();
+  const scriptPath = resolveScriptPath(workflow.id);
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`Script not found: ${scriptPath}`);
   }
@@ -788,44 +795,59 @@ export function startRun(options: RunOptions): string {
     OPENCODE_LOOP_NOTIFICATION_SOUND: String(config.notificationSound),
     OPENCODE_LOOP_AUTO_APPROVE_EXTERNAL_DIRECTORY: String(config.autoApproveExternalDirectory),
     OPENCODE_LOOP_BRANCH_PREFIX: config.branchPrefix || 'codeloop',
-    OPENCODE_LOOP_SKIP_PR: String(options.skipPr ?? config.skipPr ?? false),
+    OPENCODE_LOOP_SKIP_PR: String(workflow.id === 'development-auto-pr' ? (options.skipPr ?? config.skipPr ?? false) : false),
   };
 
-  const runMode = options.background ? 'background' : 'foreground';
+  const runMode = workflow.id === 'development-auto-pr' && options.background ? 'background' : 'foreground';
 
   // Build args
-  const args = [
-    runMode === 'background' ? '--bg' : '--fg',
-    '--log-opencode',
-    '--config',
-    path.join(os.homedir(), '.opencode-loop.conf'),
-    '--repo-dir',
-    options.repoPath,
-  ];
+  const args: string[] = [];
+  if (workflow.id === 'development-auto-pr') {
+    args.push(
+      runMode === 'background' ? '--bg' : '--fg',
+      '--log-opencode',
+      '--config',
+      path.join(os.homedir(), '.opencode-loop.conf'),
+      '--repo-dir',
+      options.repoPath,
+    );
 
-  if (options.skipPlan && planText) {
-    env.OPENCODE_LOOP_PLAN_TEXT = planText;
-    args.push('--skip-plan');
+    if (options.skipPlan && planText) {
+      env.OPENCODE_LOOP_PLAN_TEXT = planText;
+      args.push('--skip-plan');
+    }
+
+    if (options.skipPr) {
+      args.push('--skip-pr');
+    }
+
+    args.push(executionPrompt);
+  } else if (workflow.id === 'pr-autofix') {
+    if (!options.autoMerge) {
+      args.push('--skip-merge');
+    }
   }
-
-  if (options.skipPr) {
-    args.push('--skip-pr');
-  }
-
-  // Add the prompt
-  args.push(executionPrompt);
 
   const repoName = options.repoPath.split('/').pop() || 'repo';
+  const phases =
+    workflow.id === 'development-auto-pr'
+      ? createInitialPhases(options.skipPlan, !!options.skipPr)
+      : PIPELINE_PHASES.reduce((acc, phase) => {
+          acc[phase] = 'skipped';
+          return acc;
+        }, {} as Record<PipelinePhase, PhaseStatus>);
 
   const state: RunState = {
     id: runId,
     repoPath: options.repoPath,
     repoName,
+    workflowId: workflow.id,
+    workflowName: workflow.name,
     prompt,
     branchName: '',
     status: 'running',
     currentPhase: 'INIT',
-    phases: createInitialPhases(options.skipPlan, !!options.skipPr),
+    phases,
     logs: [],
     prUrl: null,
     prTitle: null,
@@ -837,15 +859,15 @@ export function startRun(options: RunOptions): string {
     startedAt: Date.now(),
     finishedAt: null,
     pid: null,
-    skipPlan: options.skipPlan,
-    background: !!options.background,
+    skipPlan: workflow.requiresPrompt ? options.skipPlan : true,
+    background: runMode === 'background',
     modelOverrides: options.modelOverrides ?? null,
-    planText: options.skipPlan ? planText || null : null,
+    planText: workflow.requiresPrompt && options.skipPlan ? planText || null : null,
     runMode,
     logFilePath: null,
     logFileOffset: 0,
     autoMerge: !!options.autoMerge,
-    skipPr: !!options.skipPr,
+    skipPr: workflow.id === 'development-auto-pr' && !!options.skipPr,
   };
 
   const child = spawn('bash', [scriptPath, ...args], {

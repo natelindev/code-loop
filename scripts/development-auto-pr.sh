@@ -115,7 +115,7 @@ log() {
 usage() {
   cat <<'EOF'
 Usage:
-  opencode-loop.sh [OPTIONS] "your prompt here"
+  development-auto-pr.sh [OPTIONS] "your prompt here"
 
 Options:
   --init              Create default config file

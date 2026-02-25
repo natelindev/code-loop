@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/ipc';
+import { PREDEFINED_WORKFLOWS } from '@shared/types';
 import type { AppConfig, ModelConfig } from '@shared/types';
 import { Button } from '@shared/components/ui/button';
 import { Input } from '@shared/components/ui/input';
@@ -138,6 +139,24 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
                     Browse
                   </Button>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Default Workflow</Label>
+                <p className="text-xs text-muted-foreground">Preselected in the New Run dialog</p>
+                <Select
+                  value={draft.defaultWorkflowId}
+                  onValueChange={(value) => setDraft((prev) => ({ ...prev, defaultWorkflowId: value }))}
+                >
+                  <SelectTrigger className="w-[320px] bg-background/50">
+                    <SelectValue placeholder="Select default workflow" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PREDEFINED_WORKFLOWS.map((workflow) => (
+                      <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="grid grid-cols-2 gap-6">
