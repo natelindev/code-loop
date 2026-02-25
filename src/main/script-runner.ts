@@ -102,6 +102,36 @@ function inferCompletedFromLogs(state: RunState): boolean {
   return state.logs.some((entry) => entry.phase.toUpperCase() === 'DONE' && entry.message.includes('Total duration:'));
 }
 
+function getWorkspaceDirForRun(state: RunState): string | null {
+  if (state.logFilePath && path.basename(state.logFilePath) === 'opencode-loop.log') {
+    return path.dirname(state.logFilePath);
+  }
+
+  if (!state.branchName) return null;
+
+  const workspaceRoot = loadConfig().workspaceRoot;
+  const rootResolved = path.resolve(workspaceRoot);
+  const branchSlug = state.branchName.replace(/\//g, '-');
+  const candidate = path.resolve(rootResolved, branchSlug);
+
+  if (candidate === rootResolved || !candidate.startsWith(`${rootResolved}${path.sep}`)) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function cleanupRunWorkspace(state: RunState) {
+  const workspaceDir = getWorkspaceDirForRun(state);
+  if (!workspaceDir || !fs.existsSync(workspaceDir)) return;
+
+  try {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+  } catch {
+    // Non-fatal: cleanup failures should not break run lifecycle handling.
+  }
+}
+
 function finalizeBackgroundRun(runId: string, state: RunState) {
   if (state.status !== 'running') return;
 
@@ -116,6 +146,7 @@ function finalizeBackgroundRun(runId: string, state: RunState) {
     for (const p of PIPELINE_PHASES) {
       if (state.phases[p] === 'active') state.phases[p] = 'failed';
     }
+    cleanupRunWorkspace(state);
   }
 
   sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
@@ -899,6 +930,7 @@ export function startRun(options: RunOptions): string {
         state.finishedAt = Date.now();
         state.prMergeStatus = state.prUrl ? 'checking' : 'none';
         state.prMergeMessage = 'Background run exited before streaming started.';
+        cleanupRunWorkspace(state);
         sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
         sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
         persistRunState(state);
@@ -906,6 +938,7 @@ export function startRun(options: RunOptions): string {
       if (code !== 0 && state.status === 'running') {
         state.status = 'failed';
         state.finishedAt = Date.now();
+        cleanupRunWorkspace(state);
         sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
         sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
         persistRunState(state);
@@ -935,6 +968,7 @@ export function startRun(options: RunOptions): string {
       for (const p of PIPELINE_PHASES) {
         if (state.phases[p] === 'active') state.phases[p] = 'failed';
       }
+      cleanupRunWorkspace(state);
       showNotification('CodeLoop', `Run failed (exit code ${code})`);
     }
 
@@ -950,6 +984,7 @@ export function startRun(options: RunOptions): string {
   child.on('error', (err) => {
     state.status = 'failed';
     state.finishedAt = Date.now();
+    cleanupRunWorkspace(state);
     sendToRenderer(IPC.RUN_ERROR, { runId, error: err.message });
     sendToRenderer(IPC.RUN_STATUS, { runId, state: { ...state } });
     sendToRenderer(IPC.RUN_DONE, { runId, prUrl: state.prUrl, status: state.status, finishedAt: state.finishedAt });
@@ -1003,6 +1038,8 @@ export function stopRun(runId: string): boolean {
       try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
     }
   }
+
+  cleanupRunWorkspace(targetState);
   return true;
 }
 

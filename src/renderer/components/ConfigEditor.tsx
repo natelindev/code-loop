@@ -174,7 +174,7 @@ export default function ConfigEditor({ config, onSave }: ConfigEditorProps) {
 
               <div className="space-y-3">
                 <Label>External Directory Access</Label>
-                <p className="text-xs text-muted-foreground">Automatically approve OpenCode file access outside the current working folder</p>
+                <p className="text-xs text-muted-foreground">Automatically approve CLI file access outside the current working folder</p>
                 <div className="flex items-center gap-3">
                   <Switch
                     checked={draft.autoApproveExternalDirectory}

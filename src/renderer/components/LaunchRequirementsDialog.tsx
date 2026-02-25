@@ -56,7 +56,7 @@ export default function LaunchRequirementsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl">
             <AlertTriangle className="w-5 h-5 text-amber-500" />
-            Complete setup before using OpenCode Loop
+            Complete setup before using CodeLoop
           </DialogTitle>
         </DialogHeader>
 

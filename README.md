@@ -4,7 +4,7 @@ CodeLoop is a sophisticated Electron-based desktop application that provides a m
 
 ![CodeLoop Screenshot](screenshot.png)
 
-At its core, CodeLoop orchestrates the `opencode-loop.sh` script to run multi-step pipelines using various large language models.
+At its core, CodeLoop orchestrates an internal pipeline script to run multi-step workflows using various large language models.
 
 ## 🚀 Key Features
 
@@ -67,7 +67,7 @@ On the first launch, CodeLoop will create a default configuration in `~/.code-lo
 
 - **Frontend**: React + Vite + Tailwind CSS + Shadcn UI
 - **Backend**: Electron (Node.js)
-- **Core Logic**: Bash (`opencode-loop.sh`)
+- **Core Logic**: Bash pipeline script
 - **IPC**: Secure communication between renderer and main process for script execution and file system access.
 
 ## 📄 License

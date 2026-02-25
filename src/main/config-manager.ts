@@ -17,7 +17,7 @@ const DEFAULT_MODELS: ModelConfig = {
 };
 
 const DEFAULT_CONFIG: AppConfig = {
-  workspaceRoot: path.join(os.homedir(), 'opencode-workspaces'),
+  workspaceRoot: path.join(os.homedir(), 'codeloop-workspaces'),
   models: { ...DEFAULT_MODELS },
   lastModelOverrides: {},
   postCloneCommands: ['pnpm i'],
